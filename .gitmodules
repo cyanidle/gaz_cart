@@ -1,0 +1,6 @@
+[submodule "radapter"]
+	path = radapter
+	url = git@github.com:cyanidle/radapter.git
+[submodule "Example_BLDC_FOC"]
+	path = SixStep
+	url = git@github.com:cyanidle/Example_BLDC_FOC.git
