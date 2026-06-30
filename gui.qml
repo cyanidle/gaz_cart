@@ -198,23 +198,24 @@ Window {
                                     placeholderText: modelData.unit
                                     background: Rectangle { color: "transparent" }
                                     onAccepted: {
-                                    var v = parseFloat(text)
-                                    if (isNaN(v)) { statusLabel.text = "Not a number: " + text; return }
-                                    radapter.model.send({ wheel: wheelBox.currentText, id: modelData.id, value: v })
-                                    statusLabel.text = "Sent " + modelData.label + " = " + v
-                                        + " to " + wheelBox.currentText
+                                        var v = parseFloat(text)
+                                        if (isNaN(v)) { statusLabel.text = "Not a number: " + text; return }
+                                        radapter.model.send({ wheel: wheelBox.currentText, id: modelData.id, value: v })
+                                        statusLabel.text = "Sent " + modelData.label + " = " + v
+                                            + " to " + wheelBox.currentText
+                                    }
                                 }
-                            }
-                            Label {
-                                text: modelData.unit
-                                color: "#555"
-                                rightPadding: 8
-                                font.pixelSize: 11
+                                Label {
+                                    text: modelData.unit
+                                    color: "#555"
+                                    rightPadding: 8
+                                    font.pixelSize: 11
+                                }
                             }
                         }
                     }
                 }
-            }
+
             }
         }
 

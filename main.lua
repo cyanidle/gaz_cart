@@ -24,8 +24,9 @@ local TRACK_WIDTH   = 0.30     -- distance between left and right wheels, m
 local ODO_PERIOD_MS = 20       -- odometry integration period
 local TELEM_PERIOD_MS = 100    -- chart telemetry stream period
 
--- Wheel module node ids (set by each module's DIP switches).
-local NODES = { fl = 1, fr = 2, rl = 3, rr = 4 }
+-- Wheel module node ids (set by each module's DIP switches).  Keys are the
+-- wheel names used throughout the script; values are Cyphal node ids.
+local WHEELS = { fl = 1, fr = 2, rl = 3, rr = 4 }
 
 -- Cyphal port bases (see CLAUDE.md / app.cpp). Per-module port = base + node id.
 local PORT = {
@@ -35,15 +36,12 @@ local PORT = {
     config       = 4100,  -- Pi -> module, { id, num, den }
 }
 
-local WHEELS = { "fl", "fr", "rl", "rr" }
-
 -- ---- CAN + Cyphal ----------------------------------------------------------
 
 local can = CAN { plugin = "socketcan", device = CAN_DEVICE }
 
 local subscribe, publish = {}, {}
-for _, w in ipairs(WHEELS) do
-    local node = NODES[w]
+for w, node in pairs(WHEELS) do
     subscribe["spd_" .. w] = { type = "uavcan.primitive.scalar.Real32.1.0",   port = PORT.linear_speed + node }
     publish  ["cmd_" .. w] = { type = "uavcan.primitive.scalar.Real32.1.0",   port = PORT.speed_cmd    + node }
     publish  ["dir_" .. w] = { type = "uavcan.primitive.scalar.Real32.1.0",   port = PORT.direct_cmd   + node }
@@ -63,7 +61,7 @@ local odo = Odometry.new { trackWidth = TRACK_WIDTH }
 
 -- latest wheel linear velocity (m/s), refreshed from Cyphal
 local wheel_v = { fl = 0.0, fr = 0.0, rl = 0.0, rr = 0.0 }
-for _, w in ipairs(WHEELS) do
+for w in pairs(WHEELS) do
     on(cyphal, "spd_" .. w, function(msg)
         wheel_v[w] = msg.value or 0.0
     end)
@@ -84,11 +82,15 @@ local wheel_tgt = { fl = 0.0, fr = 0.0, rl = 0.0, rr = 0.0 }
 
 --- Set target speed for one wheel or all four, and publish to Cyphal.
 local function set_speed(wheel, value)
-    local targets = (not wheel or wheel == "all") and WHEELS or { wheel }
     local msg = {}
-    for _, w in ipairs(targets) do
-        wheel_tgt[w] = value
-        msg["cmd_" .. w] = { value = value }
+    if not wheel or wheel == "all" then
+        for w in pairs(WHEELS) do
+            wheel_tgt[w] = value
+            msg["cmd_" .. w] = { value = value }
+        end
+    else
+        wheel_tgt[wheel] = value
+        msg["cmd_" .. wheel] = { value = value }
     end
     cyphal(msg)
 end
@@ -140,11 +142,14 @@ local function set_config(wheel, id, value)
         return
     end
     local num, den = to_rational(value)
-    local targets = (not wheel or wheel == "all") and WHEELS or { wheel }
-    for _, w in ipairs(targets) do
-        cyphal { ["cfg_" .. w] = { value = { id, num, den } } }
+    if not wheel or wheel == "all" then
+        for w in pairs(WHEELS) do
+            cyphal { ["cfg_" .. w] = { value = { id, num, den } } }
+        end
+    else
+        cyphal { ["cfg_" .. wheel] = { value = { id, num, den } } }
     end
-    log.info("config '{}' = {} ({}/{}) -> {}", def.key, value, num, den, wheel or "all")
+    log.info("config '{}' = {} -> {}", def.key, value, wheel or "all")
 end
 
 -- ---- Config-GUI websocket --------------------------------------------------
@@ -166,7 +171,7 @@ end)
 -- Stream chart data (per-wheel target + actual speed) to the GUI.
 each(TELEM_PERIOD_MS, function()
     local ch = {}
-    for _, w in ipairs(WHEELS) do
+    for w in pairs(WHEELS) do
         ch[w] = { tgt = wheel_tgt[w], act = wheel_v[w] }
     end
     local x, y, th = odo:pose()
