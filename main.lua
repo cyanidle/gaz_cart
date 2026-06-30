@@ -1,130 +1,188 @@
 -- =============================================================================
---  Cart main module — loads odometry and drives 4 motors from Cyphal topics.
+--  Cart runtime — drives the four wheel modules over Cyphal and integrates
+--  differential-drive odometry. Run on the Raspberry Pi:
 --
---  Usage from Lua:
---    require "cart.main" {
---        can_device = "vcan0",
---        node_id = 42,
---        drivetrain = "diffdrive",
---        wheel_radius = 0.05,
---        ticks_per_rev = 12,
---        trackWidth = 0.30,
---        -- or: drivetrain = "mecanum", halfTrack = 0.15, halfBase = 0.10,
---        -- Cyphal topic config for each motor's hall sensor:
---        motor_topic_type = "custom.MotorHall.1.0",
---        motor_topic_ports = { fl = 1000, fr = 1001, rl = 1002, rr = 1003 },
---        pos_field = "position",   -- field name in the incoming message
---        update_rate_ms = 10,      -- how often to call odo:update()
---    }
+--      radapter main.lua
 --
---  The returned table has .odo and .motors so you can query pose/velocities.
+--  It also opens a websocket (WS_PORT) that gui.lua — running on another host —
+--  connects to in order to tune each module's runtime config live.
+--
+--  The returned table (.drive/.stop/.set_config/.set_speed/.odo/...) is handy
+--  from an interactive session or another script that `require`s this one.
 -- =============================================================================
 
-local odometry = require "odometry"
+local Odometry    = require "odometry"
+local config_defs = require "config_defs"
+local socket      = require "socket"
 
----@class CartOpts
----@field can_device string          e.g. "vcan0"
----@field node_id number             Cyphal node id
----@field drivetrain '"mecanum"' | '"diffdrive"'
----@field wheel_radius number        meters
----@field ticks_per_rev number?      default 12
----@field halfTrack number?          mecanum only
----@field halfBase number?           mecanum only
----@field trackWidth number?         diffdrive only
----@field motor_topic_type string    Cyphal message type for motor hall sensor
----@field motor_topic_ports table<string, number>  map: "fl","fr","rl","rr" -> port
----@field pos_field string?          field name in the incoming message (default "position")
----@field update_rate_ms number?     periodic update interval in ms (default 10)
+-- ---- Tunables --------------------------------------------------------------
 
----@param opts CartOpts
-local function init(opts)
-    assert(opts.can_device, "can_device is required")
-    assert(opts.node_id, "node_id is required")
-    assert(opts.motor_topic_type, "motor_topic_type is required")
-    assert(opts.motor_topic_ports, "motor_topic_ports is required")
-    local ports = opts.motor_topic_ports
-    assert(ports.fl and ports.fr and ports.rl and ports.rr,
-        "motor_topic_ports needs fl, fr, rl, rr")
+local CAN_DEVICE    = "can0"   -- socketcan interface the modules sit on
+local NODE_ID       = 100      -- this Pi's Cyphal node id
+local WS_PORT       = 6080     -- config-GUI websocket (gui.lua connects here)
+local TRACK_WIDTH   = 0.30     -- distance between left and right wheels, m
+local ODO_PERIOD_MS = 20       -- odometry integration period
+local TELEM_PERIOD_MS = 100    -- chart telemetry stream period
 
-    local ticksPerRev = opts.ticks_per_rev or 12
-    local wheelRadius = opts.wheel_radius or 0.05
-    local posField     = opts.pos_field or "position"
-    local updateMs     = opts.update_rate_ms or 10
+-- Wheel module node ids (set by each module's DIP switches).
+local NODES = { fl = 1, fr = 2, rl = 3, rr = 4 }
 
-    -- ---- CAN + Cyphal ------------------------------------------------
+-- Cyphal port bases (see CLAUDE.md / app.cpp). Per-module port = base + node id.
+local PORT = {
+    linear_speed = 7300,  -- module -> Pi, m/s
+    speed_cmd    = 4000,  -- Pi -> module, m/s
+    direct_cmd   = 4050,  -- Pi -> module, open-loop voltage (V)
+    config       = 4100,  -- Pi -> module, { id, num, den }
+}
 
-    local can = CAN {
-        plugin = "socketcan",
-        device = opts.can_device,
-    }
+local WHEELS = { "fl", "fr", "rl", "rr" }
 
-    ---@type table<string, CyphalTopic>
-    local subscribe = {}
+-- ---- CAN + Cyphal ----------------------------------------------------------
 
-    for _, wheel in ipairs({"fl", "fr", "rl", "rr"}) do
-        subscribe[wheel] = {
-            type = opts.motor_topic_type,
-            port = ports[wheel],
-        }
-    end
+local can = CAN { plugin = "socketcan", device = CAN_DEVICE }
 
-    local cyphal = Cyphal {
-        can = can,
-        node_id = opts.node_id,
-        subscribe = subscribe,
-    }
-
-    -- ---- Motors + Odometry -------------------------------------------
-
-    local motors = {
-        fl = odometry.Motor(wheelRadius, ticksPerRev),
-        fr = odometry.Motor(wheelRadius, ticksPerRev),
-        rl = odometry.Motor(wheelRadius, ticksPerRev),
-        rr = odometry.Motor(wheelRadius, ticksPerRev),
-    }
-
-    local odo = odometry.Odometry {
-        drivetrain = opts.drivetrain,
-        fl = motors.fl,
-        fr = motors.fr,
-        rl = motors.rl,
-        rr = motors.rr,
-        halfTrack  = opts.halfTrack,
-        halfBase   = opts.halfBase,
-        trackWidth = opts.trackWidth,
-    }
-
-    -- ---- Buffer latest positions from Cyphal -------------------------
-
-    local latest = { fl = 0, fr = 0, rl = 0, rr = 0 }
-
-    for _, wheel in ipairs({"fl", "fr", "rl", "rr"}) do
-        on(cyphal, wheel, function(msg)
-            local v = msg[posField]
-            if v then
-                latest[wheel] = v
-            end
-        end)
-    end
-
-    -- ---- Periodic odometry update ------------------------------------
-
-    local socket = require "socket"
-    local lastTs = nil
-
-    each(updateMs, function()
-        local now = socket.gettime()    -- seconds with sub-ms precision
-        local dt
-        if lastTs then
-            dt = now - lastTs
-        else
-            dt = 0.0
-        end
-        lastTs = now
-
-        odo:update(latest.fl, latest.fr, latest.rl, latest.rr, dt)
-    end)
-
-    return { odo = odo, motors = motors, cyphal = cyphal, can = can }
+local subscribe, publish = {}, {}
+for _, w in ipairs(WHEELS) do
+    local node = NODES[w]
+    subscribe["spd_" .. w] = { type = "uavcan.primitive.scalar.Real32.1.0",   port = PORT.linear_speed + node }
+    publish  ["cmd_" .. w] = { type = "uavcan.primitive.scalar.Real32.1.0",   port = PORT.speed_cmd    + node }
+    publish  ["dir_" .. w] = { type = "uavcan.primitive.scalar.Real32.1.0",   port = PORT.direct_cmd   + node }
+    publish  ["cfg_" .. w] = { type = "uavcan.primitive.array.Integer32.1.0", port = PORT.config       + node }
 end
 
+local cyphal = Cyphal {
+    can       = can,
+    node_id   = NODE_ID,
+    subscribe = subscribe,
+    publish   = publish,
+}
+
+-- ---- Odometry --------------------------------------------------------------
+
+local odo = Odometry.new { trackWidth = TRACK_WIDTH }
+
+-- latest wheel linear velocity (m/s), refreshed from Cyphal
+local wheel_v = { fl = 0.0, fr = 0.0, rl = 0.0, rr = 0.0 }
+for _, w in ipairs(WHEELS) do
+    on(cyphal, "spd_" .. w, function(msg)
+        wheel_v[w] = msg.value or 0.0
+    end)
+end
+
+local last_t
+each(ODO_PERIOD_MS, function()
+    local now = socket.gettime()
+    local dt  = last_t and (now - last_t) or 0.0
+    last_t = now
+    odo:update(wheel_v.fl, wheel_v.fr, wheel_v.rl, wheel_v.rr, dt)
+end)
+
+-- ---- Driving ---------------------------------------------------------------
+
+-- Per-wheel speed targets (m/s), set by the GUI or programmatically.
+local wheel_tgt = { fl = 0.0, fr = 0.0, rl = 0.0, rr = 0.0 }
+
+--- Set target speed for one wheel or all four, and publish to Cyphal.
+local function set_speed(wheel, value)
+    local targets = (not wheel or wheel == "all") and WHEELS or { wheel }
+    local msg = {}
+    for _, w in ipairs(targets) do
+        wheel_tgt[w] = value
+        msg["cmd_" .. w] = { value = value }
+    end
+    cyphal(msg)
+end
+
+--- Command a body twist: forward speed v (m/s) and yaw rate omega (rad/s).
+local function drive(v, omega)
+    local half = TRACK_WIDTH * 0.5
+    local vL, vR = v - omega * half, v + omega * half
+    wheel_tgt.fl, wheel_tgt.rl = vL, vL
+    wheel_tgt.fr, wheel_tgt.rr = vR, vR
+    cyphal {
+        cmd_fl = { value = vL }, cmd_rl = { value = vL },
+        cmd_fr = { value = vR }, cmd_rr = { value = vR },
+    }
+end
+
+local function stop() drive(0.0, 0.0) end
+
+--- Open-loop voltage to one wheel ("fl".."rr"), for bring-up / tuning.
+local function direct_voltage(wheel, volts)
+    cyphal { ["dir_" .. wheel] = { value = volts } }
+end
+
+-- ---- Config over Cyphal ----------------------------------------------------
+
+local function gcd(a, b)
+    a, b = math.abs(a), math.abs(b)
+    while b > 0.5 do a, b = b, a % b end
+    return a
+end
+
+-- Express a float as an int32 numerator/denominator pair (value = num/den).
+local function to_rational(x)
+    local den = 1000000
+    local num = math.floor(x * den + (x >= 0 and 0.5 or -0.5))
+    local g   = gcd(num, den)
+    if g < 1 then g = 1 end
+    return math.floor(num / g), math.floor(den / g)
+end
+
+local def_by_id = {}
+for _, c in ipairs(config_defs) do def_by_id[c.id] = c end
+
+--- Push one config value (selected by id) to a wheel ("fl".."rr") or "all".
+local function set_config(wheel, id, value)
+    local def = def_by_id[id]
+    if not def then
+        log.warn("set_config: unknown config id {}", id)
+        return
+    end
+    local num, den = to_rational(value)
+    local targets = (not wheel or wheel == "all") and WHEELS or { wheel }
+    for _, w in ipairs(targets) do
+        cyphal { ["cfg_" .. w] = { value = { id, num, den } } }
+    end
+    log.info("config '{}' = {} ({}/{}) -> {}", def.key, value, num, den, wheel or "all")
+end
+
+-- ---- Config-GUI websocket --------------------------------------------------
+
+local ws = WebsocketServer { port = WS_PORT, protocol = "json" }
+
+pipe(ws, function(msg)
+    if type(msg) ~= "table" then return end
+    -- Config edit from the form fields.
+    if msg.id ~= nil and msg.value ~= nil then
+        set_config(msg.wheel or "all", math.floor(msg.id), tonumber(msg.value))
+    end
+    -- Per-wheel speed target from the tuning panel.
+    if msg.action == "set_speed" and msg.wheel then
+        set_speed(msg.wheel, tonumber(msg.value) or 0.0)
+    end
+end)
+
+-- Stream chart data (per-wheel target + actual speed) to the GUI.
+each(TELEM_PERIOD_MS, function()
+    local ch = {}
+    for _, w in ipairs(WHEELS) do
+        ch[w] = { tgt = wheel_tgt[w], act = wheel_v[w] }
+    end
+    local x, y, th = odo:pose()
+    local v, omega = odo:velocity()
+    ws {
+        chart = ch,
+        odom = { x = x, y = y, theta = th, v = v, omega = omega },
+    }
+end)
+
+log.info("cart up: node {} on {}, ws on :{}", NODE_ID, CAN_DEVICE, WS_PORT)
+
+-- ---- Public API ------------------------------------------------------------
+
+return {
+    cyphal = cyphal, can = can, odo = odo, wheel_v = wheel_v,
+    drive = drive, stop = stop, direct_voltage = direct_voltage,
+    set_speed = set_speed, set_config = set_config,
+}
