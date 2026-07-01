@@ -7,7 +7,7 @@ import QtCharts 2.3
 Window {
     visible: true
     width: 520
-    height: 720
+    height: 820
     title: "Cart config"
 
     property var wheels: ["fl", "fr", "rl", "rr"]
@@ -44,6 +44,20 @@ Window {
             }
             xAxis.min = Math.max(0, chartTime - 10.0)
             xAxis.max = Math.max(10.0, chartTime)
+            // Rescale Y to the points still in the window, so the range both
+            // grows for spikes and shrinks back once they scroll off.
+            var lo = Infinity, hi = -Infinity
+            for (var i = 0; i < actSeries.count; i++) {
+                var a = actSeries.at(i).y, t = tgtSeries.at(i).y
+                if (a < lo) lo = a
+                if (t < lo) lo = t
+                if (a > hi) hi = a
+                if (t > hi) hi = t
+            }
+            if (lo === Infinity) { lo = 0; hi = 0 }
+            var pad = Math.max((hi - lo) * 0.15, 0.05)
+            yAxis.min = lo - pad
+            yAxis.max = hi + pad
         }
     }
 
@@ -56,7 +70,8 @@ Window {
         GroupBox {
             title: "Speed — target vs actual"
             Layout.fillWidth: true
-            Layout.preferredHeight: 260
+            Layout.fillHeight: true
+            Layout.minimumHeight: 220
 
             ColumnLayout {
                 anchors.fill: parent
@@ -89,20 +104,10 @@ Window {
                     legend.visible: true
                     legend.alignment: Qt.AlignTop
 
-                    LineSeries {
-                        id: actSeries
-                        name: "actual"
-                        color: "#27ae60"
-                        width: 2
-                    }
-                    LineSeries {
-                        id: tgtSeries
-                        name: "target"
-                        color: "#e74c3c"
-                        width: 2
-                        style: Qt.DashLine
-                    }
-
+                    // Axes must be declared before the series that reference
+                    // them, and each series must be bound to axisX/axisY —
+                    // otherwise QtCharts silently creates hidden default axes
+                    // and our min/max scrolling is ignored.
                     ValueAxis {
                         id: xAxis
                         min: 0; max: 10
@@ -113,7 +118,25 @@ Window {
                         id: yAxis
                         min: -0.2; max: 0.8
                         titleText: "speed (m/s)"
-                        labelFormat: "%.1f"
+                        labelFormat: "%.2f"
+                    }
+
+                    LineSeries {
+                        id: actSeries
+                        name: "actual"
+                        color: "#27ae60"
+                        width: 2
+                        axisX: xAxis
+                        axisY: yAxis
+                    }
+                    LineSeries {
+                        id: tgtSeries
+                        name: "target"
+                        color: "#e74c3c"
+                        width: 2
+                        style: Qt.DashLine
+                        axisX: xAxis
+                        axisY: yAxis
                     }
                 }
             }
@@ -144,6 +167,34 @@ Window {
                 }
             }
             Label { text: "m/s"; color: "#888" }
+            Item { Layout.fillWidth: true }
+        }
+
+        // ---- Direct voltage row (open-loop, bring-up) ---------------------
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+            Label { text: "Direct voltage" }
+            ComboBox {
+                id: dirWheelBox
+                objectName: "dirWheelBox"
+                model: ["all", "fl", "fr", "rl", "rr"]
+                Layout.preferredWidth: 60
+            }
+            TextField {
+                id: dirField
+                objectName: "dirField"
+                Layout.preferredWidth: 90
+                text: "0.0"
+                selectByMouse: true
+                onAccepted: {
+                    var v = parseFloat(text)
+                    if (isNaN(v)) return
+                    radapter.model.send({ action: "direct", wheel: dirWheelBox.currentText, value: v })
+                    statusLabel.text = "Direct " + dirWheelBox.currentText + " = " + v + " V (open loop)"
+                }
+            }
+            Label { text: "V"; color: "#888" }
             Item { Layout.fillWidth: true }
         }
 
@@ -200,7 +251,7 @@ Window {
                                     onAccepted: {
                                         var v = parseFloat(text)
                                         if (isNaN(v)) { statusLabel.text = "Not a number: " + text; return }
-                                        radapter.model.send({ wheel: wheelBox.currentText, id: modelData.id, value: v })
+                                        radapter.model.send({ action: "config", wheel: wheelBox.currentText, id: modelData.id, value: v })
                                         statusLabel.text = "Sent " + modelData.label + " = " + v
                                             + " to " + wheelBox.currentText
                                     }
@@ -218,8 +269,6 @@ Window {
 
             }
         }
-
-        Item { Layout.fillHeight: true }
 
         // ---- Status bar ---------------------------------------------------
         Label {

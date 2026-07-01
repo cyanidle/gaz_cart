@@ -92,6 +92,7 @@ local function set_speed(wheel, value)
         wheel_tgt[wheel] = value
         msg["cmd_" .. wheel] = { value = value }
     end
+    log.info("set_speed {} -> {}", value, wheel or "all")
     cyphal(msg)
 end
 
@@ -109,9 +110,16 @@ end
 
 local function stop() drive(0.0, 0.0) end
 
---- Open-loop voltage to one wheel ("fl".."rr"), for bring-up / tuning.
+--- Open-loop voltage to one wheel ("fl".."rr") or "all", for bring-up / tuning.
 local function direct_voltage(wheel, volts)
-    cyphal { ["dir_" .. wheel] = { value = volts } }
+    log.info("direct_voltage {}V -> {}", volts, wheel or "all")
+    if not wheel or wheel == "all" then
+        for w in pairs(WHEELS) do
+            cyphal { ["dir_" .. w] = { value = volts } }
+        end
+    else
+        cyphal { ["dir_" .. wheel] = { value = volts } }
+    end
 end
 
 -- ---- Config over Cyphal ----------------------------------------------------
@@ -157,14 +165,15 @@ end
 local ws = WebsocketServer { port = WS_PORT, protocol = "json" }
 
 pipe(ws, function(msg)
-    if type(msg) ~= "table" then return end
-    -- Config edit from the form fields.
-    if msg.id ~= nil and msg.value ~= nil then
+    log("Received command: {}", msg)
+    if msg.action == "config" then
         set_config(msg.wheel or "all", math.floor(msg.id), tonumber(msg.value))
     end
-    -- Per-wheel speed target from the tuning panel.
-    if msg.action == "set_speed" and msg.wheel then
+    if msg.action == "set_speed" then
         set_speed(msg.wheel, tonumber(msg.value) or 0.0)
+    end
+    if msg.action == "direct" then
+        direct_voltage(msg.wheel, tonumber(msg.value) or 0.0)
     end
 end)
 

@@ -20,14 +20,17 @@ pipe(client.events, function(ev) log.info("ws {}: {}", url, ev) end)
 local view = QML { url = "./gui.qml" }
 
 -- QML "send" events -> websocket client -> main.lua server.
-pipe(view, client)
+pipe(view, function(msg)
+    log("From UI: {}", msg)
+    return msg
+end,
+client)
 
 -- Hand the config schema to the model; the Repeater is bound to it.
 view { params = config_defs }
 
 -- Route chart + odometry telemetry from the server into the model.
 pipe(client, function(msg)
-    if type(msg) ~= "table" then return end
     if msg.chart then
         view { chart = msg.chart }
     end
