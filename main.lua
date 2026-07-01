@@ -36,6 +36,15 @@ local PORT = {
     config       = 4100,  -- Pi -> module, { id, num, den }
 }
 
+local INITIAL_CONFIG = {
+    wheel_diameter = 0.3,
+    kp = 1.2,
+    ki = 3,
+    kd = 0.001,
+    i_limit = 3,
+    pid_tolerance = 0.05
+}
+
 -- ---- CAN + Cyphal ----------------------------------------------------------
 
 local can = CAN { plugin = "socketcan", device = CAN_DEVICE }
@@ -139,12 +148,17 @@ local function to_rational(x)
     return math.floor(num / g), math.floor(den / g)
 end
 
-local def_by_id = {}
-for _, c in ipairs(config_defs) do def_by_id[c.id] = c end
+-- config_defs is keyed by parameter key; index it by id for lookups and stash
+-- the key on each entry so we can log/report it.
+local config_by_id = {}
+for key, c in pairs(config_defs) do
+    c.key = key
+    config_by_id[c.id] = c
+end
 
 --- Push one config value (selected by id) to a wheel ("fl".."rr") or "all".
 local function set_config(wheel, id, value)
-    local def = def_by_id[id]
+    local def = config_by_id[id]
     if not def then
         log.warn("set_config: unknown config id {}", id)
         return
@@ -190,6 +204,18 @@ each(TELEM_PERIOD_MS, function()
         odom = { x = x, y = y, theta = th, v = v, omega = omega },
     }
 end)
+
+local function send_initial_config()
+    set_config("all", config_defs.wheel_diameter.id, INITIAL_CONFIG.wheel_diameter)
+    set_config("all", config_defs.pid_kp.id, INITIAL_CONFIG.kp)
+    set_config("all", config_defs.pid_ki.id, INITIAL_CONFIG.ki)
+    set_config("all", config_defs.pid_kd.id, INITIAL_CONFIG.kd)
+    set_config("all", config_defs.pid_i_limit.id, INITIAL_CONFIG.i_limit)
+    set_config("all", config_defs.pid_tolerance.id, INITIAL_CONFIG.pid_tolerance)
+    set_speed("all", 0.0)
+end
+
+send_initial_config()
 
 log.info("cart up: node {} on {}, ws on :{}", NODE_ID, CAN_DEVICE, WS_PORT)
 

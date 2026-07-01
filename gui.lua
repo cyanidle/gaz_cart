@@ -26,8 +26,16 @@ pipe(view, function(msg)
 end,
 client)
 
--- Hand the config schema to the model; the Repeater is bound to it.
-view { params = config_defs }
+-- Flatten the keyed config map into an array ordered by id (the Repeater needs
+-- a list) and hand it to the model.
+local params = {}
+for key, c in pairs(config_defs) do
+    params[#params + 1] = {
+        key = key, id = c.id, label = c.label, unit = c.unit, default = c.default,
+    }
+end
+table.sort(params, function(a, b) return a.id < b.id end)
+view { params = params }
 
 -- Route chart + odometry telemetry from the server into the model.
 pipe(client, function(msg)

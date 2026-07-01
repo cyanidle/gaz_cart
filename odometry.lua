@@ -42,7 +42,7 @@ function Odometry:update(vFL, vFR, vRL, vRR, dt)
 
     self.x     = self.x + dFwd * math.cos(mid)
     self.y     = self.y + dFwd * math.sin(mid)
-    self.theta = (self.theta + dTheta) % math.pi * 2
+    self.theta = (self.theta + dTheta) % (math.pi * 2)
 
     self.v, self.omega = v, omega
     return self
