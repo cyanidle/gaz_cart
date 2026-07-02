@@ -68,6 +68,6 @@ each(1000, function ()
 end)
 
 
-pipe(motor, function (msg, source)
+pipe(motor, function (msg)
     log(msg)
 end)

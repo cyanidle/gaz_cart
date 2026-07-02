@@ -1,0 +1,27 @@
+{
+    "all:0": {
+        "id": 0,
+        "value": 0.32,
+        "wheel": "all"
+    },
+    "all:1": {
+        "id": 1,
+        "value": 0.2,
+        "wheel": "all"
+    },
+    "all:2": {
+        "id": 2,
+        "value": 0.05,
+        "wheel": "all"
+    },
+    "all:3": {
+        "id": 3,
+        "value": 2e-04,
+        "wheel": "all"
+    },
+    "all:4": {
+        "id": 4,
+        "value": 5,
+        "wheel": "all"
+    }
+}
