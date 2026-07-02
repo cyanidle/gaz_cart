@@ -2,7 +2,7 @@
 --  Cart runtime — drives the four wheel modules over Cyphal and integrates
 --  differential-drive odometry. Run on the Raspberry Pi:
 --
---      radapter main.lua
+--      radapter cart.lua
 --
 --  It also opens a websocket (WS_PORT) that gui.lua — running on another host —
 --  connects to in order to tune each module's runtime config live.
@@ -11,13 +11,11 @@
 --  from an interactive session or another script that `require`s this one.
 -- =============================================================================
 
-local Odometry    = require "mods.odometry"
 local config_defs = require "mods.config_defs"
-local socket      = require "socket"
 
 -- ---- Tunables --------------------------------------------------------------
 
-local CAN_DEVICE    = "can0"   -- socketcan interface the modules sit on
+local CAN_DEVICE    = args[1] or "can0"   -- socketcan interface the modules sit on
 local NODE_ID       = 100      -- this Pi's Cyphal node id
 local WS_PORT       = 6080     -- config-GUI websocket (gui.lua connects here)
 local TRACK_WIDTH   = 0.30     -- distance between left and right wheels, m
@@ -49,11 +47,11 @@ local INITIAL_CONFIG = {
 local can = CAN { plugin = "socketcan", device = CAN_DEVICE }
 
 local subscribe, publish = {}, {}
-for w, node in pairs(WHEELS) do
-    subscribe["spd_" .. w] = { type = "uavcan.primitive.scalar.Real32.1.0",   port = PORT.linear_speed + node }
-    publish  ["cmd_" .. w] = { type = "uavcan.primitive.scalar.Real32.1.0",   port = PORT.speed_cmd    + node }
-    publish  ["dir_" .. w] = { type = "uavcan.primitive.scalar.Real32.1.0",   port = PORT.direct_cmd   + node }
-    publish  ["cfg_" .. w] = { type = "uavcan.primitive.array.Integer32.1.0", port = PORT.config       + node }
+for w, nid in pairs(WHEELS) do
+    subscribe["spd_" .. w] = { type = "uavcan.primitive.scalar.Real32.1.0",   port = PORT.linear_speed + nid }
+    publish  ["cmd_" .. w] = { type = "uavcan.primitive.scalar.Real32.1.0",   port = PORT.speed_cmd    + nid }
+    publish  ["dir_" .. w] = { type = "uavcan.primitive.scalar.Real32.1.0",   port = PORT.direct_cmd   + nid }
+    publish  ["cfg_" .. w] = { type = "uavcan.primitive.array.Integer32.1.0", port = PORT.config       + nid }
 end
 
 local cyphal = Cyphal {
@@ -63,10 +61,6 @@ local cyphal = Cyphal {
     publish   = publish,
 }
 
--- ---- Odometry --------------------------------------------------------------
-
-local odo = Odometry.new { trackWidth = TRACK_WIDTH }
-
 -- latest wheel linear velocity (m/s), refreshed from Cyphal
 local wheel_v = { fl = 0.0, fr = 0.0, rl = 0.0, rr = 0.0 }
 for w in pairs(WHEELS) do
@@ -74,14 +68,6 @@ for w in pairs(WHEELS) do
         wheel_v[w] = msg.value or 0.0
     end)
 end
-
-local last_t
-each(ODO_PERIOD_MS, function()
-    local now = socket.gettime()
-    local dt  = last_t and (now - last_t) or 0.0
-    last_t = now
-    odo:update(wheel_v.fl, wheel_v.fr, wheel_v.rl, wheel_v.rr, dt)
-end)
 
 -- ---- Driving ---------------------------------------------------------------
 
@@ -183,33 +169,6 @@ local ws = WebsocketServer {
     protocol = "msgpack"
 }
 
-pipe(ws, function(msg)
-    log("Received command: {}", msg)
-    if msg.action == "config" then
-        set_config(msg.wheel or "all", math.floor(msg.id), tonumber(msg.value))
-    end
-    if msg.action == "set_speed" then
-        set_speed(msg.wheel, tonumber(msg.value) or 0.0)
-    end
-    if msg.action == "direct" then
-        direct_voltage(msg.wheel, tonumber(msg.value) or 0.0)
-    end
-end)
-
--- Stream chart data (per-wheel target + actual speed) to the GUI.
-each(TELEM_PERIOD_MS, function()
-    local ch = {}
-    for w in pairs(WHEELS) do
-        ch[w] = { tgt = wheel_tgt[w], act = wheel_v[w] }
-    end
-    local x, y, th = odo:pose()
-    local v, omega = odo:velocity()
-    ws {
-        chart = ch,
-        odom = { x = x, y = y, theta = th, v = v, omega = omega },
-    }
-end)
-
 local function send_initial_config()
     set_config("all", config_defs.wheel_diameter.id, INITIAL_CONFIG.wheel_diameter)
     set_config("all", config_defs.pid_kp.id, INITIAL_CONFIG.kp)
@@ -221,6 +180,40 @@ end
 
 send_initial_config()
 
+-- ---- Nodes -------------------------------------------------------------------
+-- Each node is a module returning a single setup function. It gets everything
+-- hardware-tied or externally configurable through its config table, including
+-- `model` — a node() worker exchanging unwrapped messages with the GUI
+-- websocket under the node's namespace (mirrors Main.qml's model.node() keys).
+
+local odo = require "nodes.odo" {
+    model = node(ws, "odo"),
+    track_width = TRACK_WIDTH,
+    wheels = function()
+        local w = {}
+        for name in pairs(WHEELS) do
+            w[name] = { tgt = wheel_tgt[name], act = wheel_v[name] }
+        end
+        return w
+    end,
+    set_speed = set_speed,
+    set_config = set_config,
+    direct_voltage = direct_voltage,
+    odo_period_ms = ODO_PERIOD_MS,
+    telem_period_ms = TELEM_PERIOD_MS,
+}
+
+require "nodes.nav" {
+    model = node(ws, "nav"),
+}
+
 log.info("cart up: node {} on {}, ws on :{}", NODE_ID, CAN_DEVICE, WS_PORT)
 
---require "mods.nav"
+return {
+    drive = drive,
+    stop = stop,
+    set_speed = set_speed,
+    set_config = set_config,
+    direct_voltage = direct_voltage,
+    odo = odo,
+}

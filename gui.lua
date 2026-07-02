@@ -17,10 +17,12 @@ local client = WebsocketClient { url = url, protocol = "msgpack" }
 
 pipe(client.events, function(ev) log.info("ws {}: {}", url, ev) end)
 
-local view = QML { url = "./qml/WheelConfig.qml" }
-local nav_view = QML { url = "./qml/NavView.qml" }
+local view = QML { url = "./qml/Main.qml" }
 
 -- QML "send" events -> websocket client -> main.lua server.
+-- Both views send through child model nodes (Main.qml passes
+-- radapter.model.node("odo") / node("nav")), so every outgoing message is
+-- already wrapped as {odo = ...} or {nav = ...} — forward as-is.
 pipe(view, function(msg)
     log("From UI: {}", msg)
     return msg
@@ -36,19 +38,17 @@ for key, c in pairs(config_defs) do
     }
 end
 table.sort(params, function(a, b) return a.id < b.id end)
-view { params = params }
+view { odo = { params = params } }
 
--- Route chart + odometry telemetry from the server into the model.
+-- Route telemetry from the server into the model. Everything arrives already
+-- namespaced by node key ({odo = {chart, odom}}, {nav = {costmap, path, ...}});
+-- applyIncoming routes each inner map to the matching child GuiModel node,
+-- where WheelConfig / NavView listen. Only odomText needs local formatting.
 pipe(client, function(msg)
-    if msg.chart then
-        view { chart = msg.chart }
+    if msg.odo and msg.odo.odom then
+        local o = msg.odo.odom
+        msg.odo.odomText = fmt("odom  x={:.2f}  y={:.2f}  theta={:.1f} deg  v={:.2f}  omega={:.2f}",
+            o.x or 0, o.y or 0, math.deg(o.theta or 0), o.v or 0, o.omega or 0)
     end
-    if msg.odom then
-        local o = msg.odom
-        view { odomText = string.format("odom  x=%.2f  y=%.2f  theta=%.1f deg  v=%.2f  omega=%.2f",
-            o.x or 0, o.y or 0, math.deg(o.theta or 0), o.v or 0, o.omega or 0) }
-    end
+    view(msg)
 end)
-
-pipe(client, unwrap("nav"), nav_view)
-pipe(nav_view, wrap("nav"), client)

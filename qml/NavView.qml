@@ -11,18 +11,14 @@ import QtQuick.Layouts
 // temporary obstacle. Small ticks show each global-path point's theta; the
 // big orange arrow is the point the local planner is currently driving to.
 
-ApplicationWindow {
+Item {
     id: root
-    visible: true
-    width: 760
-    height: 820
-    title: "gaz_cart nav — LMB drag: target+theta, RMB: obstacle"
-    color: "#1e2127"
 
     property int gridW: 0
     property int gridH: 0
     property real gridRes: 0.02
-    property var cells: null // Uint8Array over the costmap buffer
+    property var model: null  // radapter.model.node("nav") — set by Main.qml
+    property var cells: null     // Uint8Array over the costmap buffer
     property var path: []
     property var robot: ({ x: 0, y: 0, theta: 0 })
     property var target: null
@@ -59,7 +55,9 @@ ApplicationWindow {
         if (msg.status !== undefined)
             root.status = msg.status
     }
-    Component.onCompleted: radapter.model.received.connect(onMsg)
+    Component.onCompleted: {
+        model.received.connect(onMsg)
+    }
 
     Item {
         anchors.fill: parent
@@ -111,7 +109,7 @@ ApplicationWindow {
 
                 var w = root.gridW, h = root.gridH, px = cellPx
 
-                ctx.fillStyle = "#282c34"
+                ctx.fillStyle = "#b0b4bc"
                 ctx.fillRect(0, 0, w * px, h * px)
 
                 // cells: cost 0 transparent, 1..99 yellow->red, 100 solid red
@@ -139,7 +137,7 @@ ApplicationWindow {
                     for (i = 0; i < root.path.length; ++i) {
                         var p = root.path[i]
                         drawHeading(ctx, toScreenX(p.x), toScreenY(p.y),
-                                    p.theta || 0, 7, 1, "#7fd7ff", false)
+                                    p.theta || 0, 7, 1, "#1a6daa", false)
                     }
                 }
 
@@ -202,7 +200,7 @@ ApplicationWindow {
                 ctx.beginPath()
                 ctx.arc(rx, ry, 6, 0, 2 * Math.PI)
                 ctx.fill()
-                drawHeading(ctx, rx, ry, root.robot.theta, 12, 2, "#ffffff", false)
+                drawHeading(ctx, rx, ry, root.robot.theta, 12, 2, "#333333", false)
             }
 
             MouseArea {
@@ -233,7 +231,7 @@ ApplicationWindow {
                     var mx = canvas.toMetersX(press.x)
                     var my = canvas.toMetersY(press.y)
                     if (press.button === Qt.RightButton) {
-                        radapter.model.send({ obstacle: { x: mx, y: my } })
+                        model.send({ obstacle: { x: mx, y: my } })
                     } else {
                         var dx = mouse.x - press.x
                         var dy = mouse.y - press.y
@@ -241,7 +239,7 @@ ApplicationWindow {
                             ? Math.atan2(-dy, dx) // screen y down -> world y up
                             : root.robot.theta
                         root.target = { x: mx, y: my, theta: theta }
-                        radapter.model.send({ target: root.target })
+                        model.send({ target: root.target })
                     }
                     canvas.requestPaint()
                 }
@@ -257,14 +255,14 @@ ApplicationWindow {
             spacing: 6
 
             Label { text: "Costmap: " + root.gridW + "×" + root.gridH + " @ " +
-                          root.gridRes.toFixed(3) + " m"; color: "#abb2bf" }
+                          root.gridRes.toFixed(3) + " m"; color: "#333333" }
             Label { text: "Robot: " + root.robot.x.toFixed(2) + ", " +
                           root.robot.y.toFixed(2) + ", " +
-                          root.robot.theta.toFixed(2); color: "#abb2bf" }
-            Label { text: "Path points: " + root.path.length; color: "#abb2bf" }
+                          root.robot.theta.toFixed(2); color: "#333333" }
+            Label { text: "Path points: " + root.path.length; color: "#333333" }
             Label {
                 objectName: "statusLabel"
-                color: "#abb2bf"
+                color: "#333333"
                 text: {
                     var s = root.status
                     if (s.reached === undefined) return "Status: —"
@@ -279,14 +277,14 @@ ApplicationWindow {
                 text: "Cancel target"
                 onClicked: {
                     root.target = null
-                    radapter.model.send({ cancel: true })
+                    model.send({ cancel: true })
                     canvas.requestPaint()
                 }
             }
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
-                color: "#5c6370"
+                color: "#555555"
                 text: "LMB press — target at press point\nLMB drag — face along the drag\n" +
                       "RMB — drop an obstacle\n(obstacles expire after keep_points_ms)\n\n" +
                       "Ticks: path point theta\nOrange arrow: local planner's pick"

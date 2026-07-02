@@ -1,24 +1,21 @@
 import QtQuick 2.3
-import QtQuick.Window 2.3
 import QtQuick.Controls 2.3
 import QtQuick.Layouts 1.3
 import QtCharts 2.3
 
-Window {
-    visible: true
-    width: 520
-    height: 820
-    title: "Cart config"
+Item {
+    id: root
 
+    property var model
     property var wheels: ["fl", "fr", "rl", "rr"]
     property double lastChartMs: 0
     property string chartWheel: "fl"
     property double chartTime: 0
 
     Component.onCompleted: {
-        radapter.model.ensure("params")
-        radapter.model.ensure("chart")
-        radapter.model.ensure("odomText")
+        model.ensure("params")
+        model.ensure("chart")
+        model.ensure("odomText")
     }
 
     // Feed new speed samples into the chart series at ~20 Hz.  Maintain a
@@ -27,7 +24,7 @@ Window {
     Timer {
         interval: 50; running: true; repeat: true
         onTriggered: {
-            var data = radapter.model.chart
+            var data = model.chart
             if (!data) return
             var pt = data[chartWheel]
             if (!pt) return
@@ -162,7 +159,7 @@ Window {
                 onAccepted: {
                     var v = parseFloat(text)
                     if (isNaN(v)) return
-                    radapter.model.send({ action: "set_speed", wheel: tgtWheelBox.currentText, value: v })
+                    model.send({ action: "set_speed", wheel: tgtWheelBox.currentText, value: v })
                     statusLabel.text = "Target " + tgtWheelBox.currentText + " = " + v + " m/s"
                 }
             }
@@ -190,7 +187,7 @@ Window {
                 onAccepted: {
                     var v = parseFloat(text)
                     if (isNaN(v)) return
-                    radapter.model.send({ action: "direct", wheel: dirWheelBox.currentText, value: v })
+                    model.send({ action: "direct", wheel: dirWheelBox.currentText, value: v })
                     statusLabel.text = "Direct " + dirWheelBox.currentText + " = " + v + " V (open loop)"
                 }
             }
@@ -219,7 +216,9 @@ Window {
                 }
 
                 Repeater {
-                    model: radapter.model.params
+                    // qualified via root: bare `model` here is the Repeater's
+                    // own model role, not WheelConfig's property
+                    model: root.model.params
                     delegate: RowLayout {
                         Layout.fillWidth: true
                         spacing: 8
@@ -251,7 +250,7 @@ Window {
                                     onAccepted: {
                                         var v = parseFloat(text)
                                         if (isNaN(v)) { statusLabel.text = "Not a number: " + text; return }
-                                        radapter.model.send({ action: "config", wheel: wheelBox.currentText, id: modelData.id, value: v })
+                                        root.model.send({ action: "config", wheel: wheelBox.currentText, id: modelData.id, value: v })
                                         statusLabel.text = "Sent " + modelData.label + " = " + v
                                             + " to " + wheelBox.currentText
                                     }
@@ -272,7 +271,7 @@ Window {
 
         // ---- Status bar ---------------------------------------------------
         Label {
-            text: radapter.model.odomText ? radapter.model.odomText : "(no telemetry yet)"
+            text: model.odomText ? model.odomText : "(no telemetry yet)"
             color: "#555"
             Layout.fillWidth: true
         }
