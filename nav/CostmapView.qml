@@ -5,13 +5,18 @@ import QtQuick.Layouts
 // Costmap visualization + click-to-plan.
 // Reinterprets CostmapServer's raw buffer (GridHeader + cells, see
 // nav_common.hpp) straight from the message bytes — no repacking anywhere.
+//
+// Left press-drag-release: target at the press point, facing along the drag.
+// A plain left click keeps the robot's current heading. Right click drops a
+// temporary obstacle. Small ticks show each global-path point's theta; the
+// big orange arrow is the point the local planner is currently driving to.
 
 ApplicationWindow {
     id: root
     visible: true
     width: 760
     height: 820
-    title: "gaz_cart nav — LMB: target, RMB: obstacle"
+    title: "gaz_cart nav — LMB drag: target+theta, RMB: obstacle"
     color: "#1e2127"
 
     property int gridW: 0
@@ -21,6 +26,7 @@ ApplicationWindow {
     property var path: []
     property var robot: ({ x: 0, y: 0, theta: 0 })
     property var target: null
+    property var localTarget: null
     property var status: ({})
 
     function onMsg(msg) {
@@ -38,6 +44,12 @@ ApplicationWindow {
         }
         if (msg.path !== undefined) {
             root.path = msg.path
+            if (msg.path.length === 0)
+                root.localTarget = null
+            canvas.requestPaint()
+        }
+        if (msg.local_target !== undefined) {
+            root.localTarget = msg.local_target
             canvas.requestPaint()
         }
         if (msg.position !== undefined) {
@@ -62,7 +74,6 @@ ApplicationWindow {
             anchors.right: sidebar.left
             anchors.rightMargin: 8
 
-            property int clicks: 0
             property real cellPx: root.gridW > 0
                 ? Math.min(width / root.gridW, height / root.gridH) : 1
 
@@ -70,6 +81,28 @@ ApplicationWindow {
             function toScreenY(my) { return root.gridH * cellPx - my / root.gridRes * cellPx }
             function toMetersX(sx) { return sx / cellPx * root.gridRes }
             function toMetersY(sy) { return (root.gridH * cellPx - sy) / cellPx * root.gridRes }
+
+            // heading tick/arrow at screen point (sx, sy); theta is world-frame
+            // (y up), screen y grows down, hence the minus on sin
+            function drawHeading(ctx, sx, sy, theta, len, width, color, arrowhead) {
+                var ex = sx + len * Math.cos(theta)
+                var ey = sy - len * Math.sin(theta)
+                ctx.strokeStyle = color
+                ctx.lineWidth = width
+                ctx.beginPath()
+                ctx.moveTo(sx, sy)
+                ctx.lineTo(ex, ey)
+                if (arrowhead) {
+                    var hl = Math.max(4, len * 0.35)
+                    var a1 = theta + Math.PI * 0.8
+                    var a2 = theta - Math.PI * 0.8
+                    ctx.moveTo(ex, ey)
+                    ctx.lineTo(ex + hl * Math.cos(a1), ey - hl * Math.sin(a1))
+                    ctx.moveTo(ex, ey)
+                    ctx.lineTo(ex + hl * Math.cos(a2), ey - hl * Math.sin(a2))
+                }
+                ctx.stroke()
+            }
 
             onPaint: {
                 var ctx = getContext("2d")
@@ -94,7 +127,7 @@ ApplicationWindow {
                     }
                 }
 
-                // global path
+                // global path + a small heading tick on every point
                 if (root.path.length > 1) {
                     ctx.strokeStyle = "#61afef"
                     ctx.lineWidth = 2
@@ -103,9 +136,41 @@ ApplicationWindow {
                     for (var i = 1; i < root.path.length; ++i)
                         ctx.lineTo(toScreenX(root.path[i].x), toScreenY(root.path[i].y))
                     ctx.stroke()
+                    for (i = 0; i < root.path.length; ++i) {
+                        var p = root.path[i]
+                        drawHeading(ctx, toScreenX(p.x), toScreenY(p.y),
+                                    p.theta || 0, 7, 1, "#7fd7ff", false)
+                    }
                 }
 
-                // target
+                // local planner's chosen lookahead point: big arrow from the
+                // robot base to the point, arrowhead at the point
+                if (root.localTarget) {
+                    var lx = toScreenX(root.localTarget.x)
+                    var ly = toScreenY(root.localTarget.y)
+                    var bx = toScreenX(root.robot.x)
+                    var by = toScreenY(root.robot.y)
+                    var ang = Math.atan2(ly - by, lx - bx)
+                    var hl = 9
+                    ctx.strokeStyle = "#d19a66"
+                    ctx.lineWidth = 3
+                    ctx.beginPath()
+                    ctx.moveTo(bx, by)
+                    ctx.lineTo(lx, ly)
+                    ctx.moveTo(lx, ly)
+                    ctx.lineTo(lx + hl * Math.cos(ang + Math.PI * 0.8),
+                               ly + hl * Math.sin(ang + Math.PI * 0.8))
+                    ctx.moveTo(lx, ly)
+                    ctx.lineTo(lx + hl * Math.cos(ang - Math.PI * 0.8),
+                               ly + hl * Math.sin(ang - Math.PI * 0.8))
+                    ctx.stroke()
+                    ctx.fillStyle = "#d19a66"
+                    ctx.beginPath()
+                    ctx.arc(lx, ly, 4, 0, 2 * Math.PI)
+                    ctx.fill()
+                }
+
+                // target: cross + commanded heading
                 if (root.target) {
                     var tx = toScreenX(root.target.x), ty = toScreenY(root.target.y)
                     ctx.strokeStyle = "#98c379"
@@ -114,6 +179,21 @@ ApplicationWindow {
                     ctx.moveTo(tx - 7, ty); ctx.lineTo(tx + 7, ty)
                     ctx.moveTo(tx, ty - 7); ctx.lineTo(tx, ty + 7)
                     ctx.stroke()
+                    if (root.target.theta !== undefined)
+                        drawHeading(ctx, tx, ty, root.target.theta, 16, 2, "#98c379", true)
+                }
+
+                // drag preview: arrow from press point along the drag
+                if (mouseArea.pressPos && mouseArea.dragPos
+                        && mouseArea.pressPos.button === Qt.LeftButton) {
+                    var sx0 = mouseArea.pressPos.x, sy0 = mouseArea.pressPos.y
+                    var ang = Math.atan2(-(mouseArea.dragPos.y - sy0),
+                                         mouseArea.dragPos.x - sx0)
+                    var dlen = Math.hypot(mouseArea.dragPos.x - sx0,
+                                          mouseArea.dragPos.y - sy0)
+                    drawHeading(ctx, sx0, sy0, ang, Math.max(dlen, 10), 2,
+                                dlen >= mouseArea.dragThresholdPx ? "#98c379" : "#5c6370",
+                                true)
                 }
 
                 // robot: circle + heading
@@ -122,28 +202,46 @@ ApplicationWindow {
                 ctx.beginPath()
                 ctx.arc(rx, ry, 6, 0, 2 * Math.PI)
                 ctx.fill()
-                ctx.strokeStyle = "#ffffff"
-                ctx.lineWidth = 2
-                ctx.beginPath()
-                ctx.moveTo(rx, ry)
-                ctx.lineTo(rx + 12 * Math.cos(root.robot.theta),
-                           ry - 12 * Math.sin(root.robot.theta))
-                ctx.stroke()
+                drawHeading(ctx, rx, ry, root.robot.theta, 12, 2, "#ffffff", false)
             }
 
             MouseArea {
+                id: mouseArea
                 anchors.fill: parent
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
-                onClicked: function (mouse) {
-                    canvas.clicks++
-                    if (root.gridW <= 0) return
-                    var mx = canvas.toMetersX(mouse.x)
-                    var my = canvas.toMetersY(mouse.y)
-                    if (mouse.button === Qt.LeftButton) {
-                        root.target = { x: mx, y: my }
-                        radapter.model.send({ target: { x: mx, y: my, theta: root.robot.theta } })
-                    } else {
+
+                // Target = press point; drag past the threshold to command
+                // theta along the drag, otherwise keep the robot's heading.
+                readonly property real dragThresholdPx: 10
+                property var pressPos: null // { x, y, button }
+                property var dragPos: null
+
+                onPressed: function (mouse) {
+                    pressPos = { x: mouse.x, y: mouse.y, button: mouse.button }
+                    dragPos = null
+                }
+                onPositionChanged: function (mouse) {
+                    if (!pressPos) return
+                    dragPos = { x: mouse.x, y: mouse.y }
+                    canvas.requestPaint()
+                }
+                onReleased: function (mouse) {
+                    var press = pressPos
+                    pressPos = null
+                    dragPos = null
+                    if (!press || root.gridW <= 0) return
+                    var mx = canvas.toMetersX(press.x)
+                    var my = canvas.toMetersY(press.y)
+                    if (press.button === Qt.RightButton) {
                         radapter.model.send({ obstacle: { x: mx, y: my } })
+                    } else {
+                        var dx = mouse.x - press.x
+                        var dy = mouse.y - press.y
+                        var theta = Math.hypot(dx, dy) >= dragThresholdPx
+                            ? Math.atan2(-dy, dx) // screen y down -> world y up
+                            : root.robot.theta
+                        root.target = { x: mx, y: my, theta: theta }
+                        radapter.model.send({ target: root.target })
                     }
                     canvas.requestPaint()
                 }
@@ -189,8 +287,9 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: "#5c6370"
-                text: "Left click — drive there\nRight click — drop an obstacle\n" +
-                      "(obstacles expire after keep_points_ms)"
+                text: "LMB press — target at press point\nLMB drag — face along the drag\n" +
+                      "RMB — drop an obstacle\n(obstacles expire after keep_points_ms)\n\n" +
+                      "Ticks: path point theta\nOrange arrow: local planner's pick"
             }
             Item { Layout.fillHeight: true }
         }

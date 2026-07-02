@@ -8,8 +8,10 @@
 //              `move_base_simple/goal`, merged into one field)
 //   cancel   — any non-nil value cancels the current target (was
 //              `global_planer/cancel`)
-//   status   — LocalPlanner status { idle_for, ... } (was `planer_status`);
-//              idling long enough after a fresh target finishes the run
+//   status   — LocalPlanner status { reached, rotated, idle_for, ... } (was
+//              `planer_status`); the run finishes once the local planner is
+//              done (reached && rotated) and has idled long enough — a stuck
+//              robot idles too, but never counts as done
 //
 // Output (data channel):
 //   path — list of { x, y, theta } in meters; empty when planning
@@ -66,9 +68,13 @@ RAD_DESCRIBE(GlobalPlannerConfig) {
 
 struct LocalStatus {
     WithDefault<double> idle_for = 0.0;
+    WithDefault<bool> reached = false;
+    WithDefault<bool> rotated = false;
 };
 RAD_DESCRIBE(LocalStatus) {
     RAD_MEMBER(idle_for);
+    RAD_MEMBER(reached);
+    RAD_MEMBER(rotated);
 }
 
 struct PlannerNode {
@@ -158,11 +164,13 @@ private:
 
     void onLocalStatus(QVariant const& msg) {
         auto status = ParseAs<LocalStatus>(msg);
+        // idle_for also grows while stuck — only reached && rotated is "done"
         if (!canceled &&
+            status.reached && status.rotated &&
             timeSinceNewTarget > config.min_time_for_target &&
             status.idle_for >= config.consider_reached_after.value)
         {
-            Info("target finished (local planner idle for {} s)", status.idle_for);
+            Info("target finished (local planner done, idle for {} s)", status.idle_for);
             cancelTarget();
         }
     }

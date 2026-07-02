@@ -14,10 +14,14 @@
 //   pause    — bool (was `monte_carlo_state.is_bad`): freeze in place while true
 //
 // Output (data channel), every tick (tick_rate Hz):
-//   cmd_vel — { x, y, theta }: body-frame linear m/s + angular rad/s
-//             (was `cmd_vel`, Twist)
-//   status  — { reached, rotated, is_stuck, driving_for, idle_for }
-//             (was `planer_status`, PlanerStatus — feed back to GlobalPlanner)
+//   cmd_vel      — { x, y, theta }: body-frame linear m/s + angular rad/s
+//                  (was `cmd_vel`, Twist)
+//   status       — { reached, rotated, is_stuck, driving_for, idle_for }
+//                  (was `planer_status`, PlanerStatus — feed back to GlobalPlanner)
+//   local_target — { x, y, theta }: the path point currently being driven to
+//                  (findBestTarget's pick); only present while a path is active.
+//                  Named local_target, NOT target: this stream is piped back
+//                  into GlobalPlanner, whose `target` field is a command.
 //
 // Former ROS params are the Lua constructor config; planner:Reload{...}
 // re-applies a full config table.
@@ -59,7 +63,7 @@ struct DriveConfig {
     WithDefault<double> min_speed_coeff = 0.4;
     WithDefault<double> min_rotation_spd = 0.3;
     WithDefault<double> full_rot_spd_per_radians = 2.0;
-    WithDefault<bool> enable_mid_path_rotation = false;
+    WithDefault<bool> enable_mid_path_rotation = true;
     WithDefault<double> max_radians_per_meter = 1.0;
     WithDefault<double> max_speed_for_meters = 0.5;
 };
@@ -91,7 +95,9 @@ class LocalPlanner final : public Worker {
 
     nav::Grid costmap;
     nav::Position position;
-    nav::Position target;
+    nav::Position target; // lookahead point currently driven to
+    nav::Position goal;   // final path point — "done" is judged against this
+    bool goalValid = false;
     std::vector<nav::Position> path;
     bool paused = false;
 
@@ -133,6 +139,10 @@ public:
         if (map.contains("path")) {
             onPath(map.value("path").toList());
         }
+        if (!map.value("cancel").isNull()) {
+            goal = position;
+            target = position;
+        }
     }
 
 private:
@@ -155,6 +165,8 @@ private:
             path.clear();
         } else {
             path = std::move(newPath);
+            goal = path.back();
+            goalValid = true;
             target = findBestTarget();
         }
     }
@@ -268,13 +280,19 @@ private:
     void stDone()     { status.driving_for = 0; status.idle_for += tickInterval; status.reached = true; status.rotated = true; status.is_stuck = false; }
     void stPaused()   { if (status.idle_for) status.idle_for += tickInterval; else status.driving_for += tickInterval; }
 
+    bool reachedGoal() const {
+        auto dx = goal.x - position.x;
+        auto dy = goal.y - position.y;
+        return goalValid && std::sqrt(dx * dx + dy * dy) <= config.margins.value.position;
+    }
+
     void tick() {
         Cmd cmd; // zero: stop
         if (paused) {
             stPaused();
             path.clear();
         } else if (path.empty()) {
-            if (reachedTarget()) stDone();
+            if (reachedGoal()) stDone();
             else stStuck();
         } else if (!reachedTarget()) {
             stMoving();
@@ -282,11 +300,15 @@ private:
         } else if (!rotated()) {
             stRotating();
             cmd = rotateCmd();
-        } else {
+        } else if (reachedGoal()) {
             stDone();
             path.clear();
+        } else {
+            target = findBestTarget();
+            stMoving();
+            cmd = driveCmd();
         }
-        emit SendMsg(QVariantMap{
+        QVariantMap out{
             {"cmd_vel", QVariantMap{
                 {"x", cmd.x},
                 {"y", cmd.y},
@@ -296,9 +318,22 @@ private:
                 {"rotated", status.rotated},
                 {"is_stuck", status.is_stuck},
                 {"driving_for", status.driving_for},
-                {"idle_for", status.idle_for},
-            }},
-        });
+                {"idle_for", status.idle_for}}},
+        };
+        if (path.size()) {
+            out["local_target"] = QVariantMap{
+                {"x", target.x},
+                {"y", target.y},
+                {"theta", target.theta.value},
+            };
+        } else {
+            out["local_target"] = QVariantMap{
+                {"x", position.x},
+                {"y", position.y},
+                {"theta", position.theta.value},
+            };
+        }
+        emit SendMsg(out);
     }
 };
 

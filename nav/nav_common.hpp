@@ -212,8 +212,8 @@ private:
 // ---- The `position` / `target` / pose message fields --------------------------
 
 struct Position {
-    radapter::WithDefault<double> x = 0.0;
-    radapter::WithDefault<double> y = 0.0;
+    double x = 0.0;
+    double y = 0.0;
     radapter::WithDefault<double> theta = 0.0;
 };
 RAD_DESCRIBE(Position) {

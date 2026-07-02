@@ -17,13 +17,14 @@ load_plugin(SCRIPT_DIR .. "/build/libgaz_nav")
 local MAX_LIN_SPD = 0.5 -- m/s at cmd_vel = 1
 local MAX_ROT_SPD = 1.5 -- rad/s at cmd_vel = 1
 local SIM_MS      = 50
+local ROBOT_RADIUS = 0.1
 
 local costmap = CostmapServer {
     update_rate_ms = 100,
     keep_points_ms = 30000,
     width = 101, height = 151, resolution = 0.02,
-    inflate = { robot_safe_radius = 0.10 },
-    inflate_static = { robot_safe_radius = 0.10 },
+    inflate = { robot_safe_radius = ROBOT_RADIUS },
+    inflate_static = { robot_safe_radius = ROBOT_RADIUS },
     -- image = SCRIPT_DIR .. "/costmap.png",  -- optional static map
 }
 
@@ -60,7 +61,10 @@ pipe(lp, view)      -- status
 pipe(view, function(msg)
     if msg.target then gp { target = msg.target } end
     if msg.obstacle then costmap { point = msg.obstacle } end
-    if msg.cancel then gp { cancel = true } end
+    if msg.cancel then
+        lp { cancel = true }
+        gp { cancel = true }
+    end
 end)
 
 each(SIM_MS, function()
