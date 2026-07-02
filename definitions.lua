@@ -1,1 +1,1 @@
-./radapter/definitions.lua
+radapter/definitions.lua

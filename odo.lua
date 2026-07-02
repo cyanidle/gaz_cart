@@ -11,8 +11,8 @@
 --  from an interactive session or another script that `require`s this one.
 -- =============================================================================
 
-local Odometry    = require "odometry"
-local config_defs = require "config_defs"
+local Odometry    = require "mods.odometry"
+local config_defs = require "mods.config_defs"
 local socket      = require "socket"
 
 -- ---- Tunables --------------------------------------------------------------

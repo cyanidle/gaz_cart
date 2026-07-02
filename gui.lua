@@ -10,14 +10,14 @@
 --  PID with instant visual feedback.
 -- =============================================================================
 
-local config_defs = require "config_defs"
+local config_defs = require "mods.config_defs"
 
 local url    = args[1] or "ws://127.0.0.1:6080"
 local client = WebsocketClient { url = url, protocol = "json" }
 
 pipe(client.events, function(ev) log.info("ws {}: {}", url, ev) end)
 
-local view = QML { url = "./gui.qml" }
+local view = QML { url = "./qml/WheelConfig.qml" }
 
 -- QML "send" events -> websocket client -> main.lua server.
 pipe(view, function(msg)
