@@ -12,7 +12,7 @@
 --  feed odometry into `position` and pass cmd_vel to main.lua's drive().
 -- =============================================================================
 
-load_plugin(SCRIPT_DIR .. "/../nav/build/libgaz_nav")
+load_plugin(SCRIPT_DIR .. "/build/nav/libgaz_nav")
 
 local MAX_LIN_SPD = 0.5 -- m/s at cmd_vel = 1
 local MAX_ROT_SPD = 1.5 -- rad/s at cmd_vel = 1

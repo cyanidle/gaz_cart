@@ -20,5 +20,4 @@ return {
     pid_ki         = { id = 2, label = "Velocity Ki",     unit = "V/(m·s)", default = 0.10, min = 0.0,  max = 50,  step = 0.01 },
     pid_kd         = { id = 3, label = "Velocity Kd",     unit = "V·s/m",   default = 0.00, min = 0.0,  max = 50,  step = 0.01 },
     pid_i_limit    = { id = 4, label = "Integral limit",  unit = "V",       default = 10.0, min = 0.0,  max = 24,  step = 0.1  },
-    pid_tolerance  = { id = 5, label = "PID tolerance",   unit = "m/s",     default = 0.05, min = 0.0,  max = 5,   step = 0.01 },
 }

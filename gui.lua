@@ -13,7 +13,7 @@
 local config_defs = require "mods.config_defs"
 
 local url    = args[1] or "ws://127.0.0.1:6080"
-local client = WebsocketClient { url = url, protocol = "json" }
+local client = WebsocketClient { url = url, protocol = "msgpack" }
 
 pipe(client.events, function(ev) log.info("ws {}: {}", url, ev) end)
 

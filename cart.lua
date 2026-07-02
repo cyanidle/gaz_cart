@@ -42,7 +42,6 @@ local INITIAL_CONFIG = {
     ki = 3,
     kd = 0.001,
     i_limit = 3,
-    pid_tolerance = 0.05
 }
 
 -- ---- CAN + Cyphal ----------------------------------------------------------
@@ -181,7 +180,7 @@ end
 local ws = WebsocketServer {
     name = "main_ws",
     port = WS_PORT,
-    protocol = "json"
+    protocol = "msgpack"
 }
 
 pipe(ws, function(msg)
@@ -217,12 +216,11 @@ local function send_initial_config()
     set_config("all", config_defs.pid_ki.id, INITIAL_CONFIG.ki)
     set_config("all", config_defs.pid_kd.id, INITIAL_CONFIG.kd)
     set_config("all", config_defs.pid_i_limit.id, INITIAL_CONFIG.i_limit)
-    set_config("all", config_defs.pid_tolerance.id, INITIAL_CONFIG.pid_tolerance)
-    set_speed("all", 0.0)
+    direct_voltage("all", 0.0)
 end
 
 send_initial_config()
 
 log.info("cart up: node {} on {}, ws on :{}", NODE_ID, CAN_DEVICE, WS_PORT)
 
-require "mods.nav"
+--require "mods.nav"

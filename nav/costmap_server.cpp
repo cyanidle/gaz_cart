@@ -166,8 +166,7 @@ private:
             Raise("CostmapServer: image is {}x{}, config wants {}x{}",
                   img.width(), img.height(), into.width(), into.height());
         }
-        // Image rows go top-down, the costmap's y axis goes up
-        img = img.convertToFormat(QImage::Format_Grayscale8).flipped(Qt::Vertical);
+        img = img.convertToFormat(QImage::Format_Grayscale8).mirrored();
         for (int y = 0; y < into.height(); ++y) {
             const auto* line = img.constScanLine(y);
             for (int x = 0; x < into.width(); ++x) {
