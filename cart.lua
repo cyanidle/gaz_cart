@@ -117,7 +117,9 @@ local function drive(v, omega)
     }
 end
 
-local function stop() drive(0.0, 0.0) end
+local function stop()
+    drive(0.0, 0.0)
+end
 
 --- Open-loop voltage to one wheel ("fl".."rr") or "all", for bring-up / tuning.
 local function direct_voltage(wheel, volts)
@@ -176,7 +178,11 @@ end
 
 -- ---- Config-GUI websocket --------------------------------------------------
 
-local ws = WebsocketServer { port = WS_PORT, protocol = "json" }
+local ws = WebsocketServer {
+    name = "main_ws",
+    port = WS_PORT,
+    protocol = "json"
+}
 
 pipe(ws, function(msg)
     log("Received command: {}", msg)
@@ -219,10 +225,4 @@ send_initial_config()
 
 log.info("cart up: node {} on {}, ws on :{}", NODE_ID, CAN_DEVICE, WS_PORT)
 
--- ---- Public API ------------------------------------------------------------
-
-return {
-    cyphal = cyphal, can = can, odo = odo, wheel_v = wheel_v,
-    drive = drive, stop = stop, direct_voltage = direct_voltage,
-    set_speed = set_speed, set_config = set_config,
-}
+require "mods.nav"

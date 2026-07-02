@@ -76,13 +76,14 @@ RAD_DESCRIBE(DriveConfig) {
     RAD_MEMBER(max_speed_for_meters);
 }
 
-struct LocalPlannerConfig {
+struct LocalPlannerConfig : WorkerConfig {
     WithDefault<double> tick_rate = 12.0; // Hz
     WithDefault<MarginsConfig> margins{};
     WithDefault<PathConfig> path{};
     WithDefault<DriveConfig> drive{};
 };
 RAD_DESCRIBE(LocalPlannerConfig) {
+    PARENT(WorkerConfig);
     RAD_MEMBER(tick_rate);
     RAD_MEMBER(margins);
     RAD_MEMBER(path);
@@ -113,7 +114,7 @@ class LocalPlanner final : public Worker {
 
 public:
     LocalPlanner(LocalPlannerConfig conf, Instance* inst) :
-        Worker(inst, "local_planner"),
+        Worker(inst, conf, "local_planner"),
         tickTimer(new QTimer(this))
     {
         tickTimer->callOnTimeout(this, &LocalPlanner::tick);

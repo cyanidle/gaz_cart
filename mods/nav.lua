@@ -12,7 +12,7 @@
 --  feed odometry into `position` and pass cmd_vel to main.lua's drive().
 -- =============================================================================
 
-load_plugin(SCRIPT_DIR .. "/nav/build/libgaz_nav")
+load_plugin(SCRIPT_DIR .. "/../nav/build/libgaz_nav")
 
 local MAX_LIN_SPD = 0.5 -- m/s at cmd_vel = 1
 local MAX_ROT_SPD = 1.5 -- rad/s at cmd_vel = 1
@@ -20,6 +20,7 @@ local SIM_MS      = 50
 local ROBOT_RADIUS = 0.1
 
 local costmap = CostmapServer {
+    name = "costmap_server",
     update_rate_ms = 100,
     keep_points_ms = 30000,
     width = 101, height = 151, resolution = 0.02,
@@ -29,11 +30,13 @@ local costmap = CostmapServer {
 }
 
 local gp = GlobalPlanner {
+    name = "global_planer",
     update_rate_ms = 100,
     a_star = { max_cost = 35 },
 }
 
 local lp = LocalPlanner {
+    name = "local_planer",
     tick_rate = 20,
     margins = { position = 0.03, theta = 0.05 },
 }
@@ -51,14 +54,11 @@ local cmd = { x = 0, y = 0, theta = 0 }
 on(lp, "cmd_vel", function(c) cmd = c end)
 
 -- ---- GUI ---------------------------------------------------------------------
+pipe(costmap, wrap("nav"), workers.main_ws) -- costmap bytes
+pipe(gp, wrap("nav"), workers.main_ws)      -- path
+pipe(lp, wrap("nav"), workers.main_ws)      -- status
 
-local view = QML { url = "./qml/CostmapView.qml" }
-
-pipe(costmap, view) -- costmap bytes
-pipe(gp, view)      -- path
-pipe(lp, view)      -- status
-
-pipe(view, function(msg)
+pipe(workers.main_ws, unwrap("nav"), function(msg)
     if msg.target then gp { target = msg.target } end
     if msg.obstacle then costmap { point = msg.obstacle } end
     if msg.cancel then
@@ -77,9 +77,7 @@ each(SIM_MS, function()
     local msg = { position = pos }
     gp(msg)
     lp(msg)
-    view(msg)
+    workers.main_ws {
+        nav = msg
+    }
 end)
-
-log.info("nav demo up: left click = target, right click = obstacle")
-
-return { costmap = costmap, gp = gp, lp = lp, view = view }

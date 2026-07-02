@@ -18,6 +18,7 @@ local client = WebsocketClient { url = url, protocol = "json" }
 pipe(client.events, function(ev) log.info("ws {}: {}", url, ev) end)
 
 local view = QML { url = "./qml/WheelConfig.qml" }
+local nav_view = QML { url = "./qml/NavView.qml" }
 
 -- QML "send" events -> websocket client -> main.lua server.
 pipe(view, function(msg)
@@ -48,3 +49,6 @@ pipe(client, function(msg)
             o.x or 0, o.y or 0, math.deg(o.theta or 0), o.v or 0, o.omega or 0) }
     end
 end)
+
+pipe(client, unwrap("nav"), nav_view)
+pipe(nav_view, wrap("nav"), client)

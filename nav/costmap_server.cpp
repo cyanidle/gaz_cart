@@ -35,7 +35,7 @@ RAD_DESCRIBE(InflateConfig) {
     RAD_MEMBER(robot_safe_radius);
 }
 
-struct CostmapServerConfig {
+struct CostmapServerConfig : WorkerConfig {
     WithDefault<int> update_rate_ms = 80;
     WithDefault<int> keep_points_ms = 15000;
     WithDefault<bool> ignore_all_outside = true;
@@ -47,6 +47,7 @@ struct CostmapServerConfig {
     WithDefault<InflateConfig> inflate_static{};
 };
 RAD_DESCRIBE(CostmapServerConfig) {
+    PARENT(WorkerConfig);
     RAD_MEMBER(update_rate_ms);
     RAD_MEMBER(keep_points_ms);
     RAD_MEMBER(ignore_all_outside);

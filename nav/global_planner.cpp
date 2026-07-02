@@ -47,7 +47,7 @@ RAD_DESCRIBE(AStarConfig) {
     RAD_MEMBER(max_cost);
 }
 
-struct GlobalPlannerConfig {
+struct GlobalPlannerConfig : WorkerConfig {
     WithDefault<AStarConfig> a_star{};
     WithDefault<int> nodes_batch_size = 10000;
     WithDefault<int> reserve_in_path_size = 60;
@@ -57,6 +57,7 @@ struct GlobalPlannerConfig {
     WithDefault<double> min_time_for_target = 0.5;    // s before idle can finish a target
 };
 RAD_DESCRIBE(GlobalPlannerConfig) {
+    PARENT(WorkerConfig);
     RAD_MEMBER(a_star);
     RAD_MEMBER(nodes_batch_size);
     RAD_MEMBER(reserve_in_path_size);
@@ -104,7 +105,7 @@ class GlobalPlanner final : public Worker {
 
 public:
     GlobalPlanner(GlobalPlannerConfig conf, Instance* inst) :
-        Worker(inst, "global_planner"),
+        Worker(inst, conf, "global_planner"),
         updateTimer(new QTimer(this))
     {
         updateTimer->callOnTimeout(this, &GlobalPlanner::update);
