@@ -20,6 +20,7 @@ Item {
     property var model: null  // radapter.model.node("nav") — set by Main.qml
     property var cells: null     // Uint8Array over the costmap buffer
     property var path: []
+    property var scan: []  // lidar hit points [{x,y}...] in world meters
     property var robot: ({ x: 0, y: 0, theta: 0 })
     property var target: null
     property var localTarget: null
@@ -46,6 +47,10 @@ Item {
         }
         if (msg.local_target !== undefined) {
             root.localTarget = msg.local_target
+            canvas.requestPaint()
+        }
+        if (msg.scan !== undefined) {
+            root.scan = msg.scan.points || []
             canvas.requestPaint()
         }
         if (msg.position !== undefined) {
@@ -109,7 +114,7 @@ Item {
 
                 var w = root.gridW, h = root.gridH, px = cellPx
 
-                ctx.fillStyle = "#b0b4bc"
+                ctx.fillStyle = '#404449'
                 ctx.fillRect(0, 0, w * px, h * px)
 
                 // cells: cost 0 transparent, 1..99 yellow->red, 100 solid red
@@ -122,6 +127,17 @@ Item {
                         ctx.fillStyle = cost >= 100 ? "#e06c75"
                             : Qt.rgba(0.9, 0.75 - 0.5 * cost / 100, 0.2, 0.25 + 0.6 * cost / 100)
                         ctx.fillRect(x * px, sy, px + 0.5, px + 0.5)
+                    }
+                }
+
+                // lidar scan: raw world-frame hit points
+                if (root.scan.length) {
+                    ctx.fillStyle = "#2b90d9"
+                    for (var si = 0; si < root.scan.length; ++si) {
+                        var sp = root.scan[si]
+                        ctx.beginPath()
+                        ctx.arc(toScreenX(sp.x), toScreenY(sp.y), 1.5, 0, 2 * Math.PI)
+                        ctx.fill()
                     }
                 }
 
@@ -171,14 +187,14 @@ Item {
                 // target: cross + commanded heading
                 if (root.target) {
                     var tx = toScreenX(root.target.x), ty = toScreenY(root.target.y)
-                    ctx.strokeStyle = "#98c379"
+                    ctx.strokeStyle = '#3d8025'
                     ctx.lineWidth = 2
                     ctx.beginPath()
                     ctx.moveTo(tx - 7, ty); ctx.lineTo(tx + 7, ty)
                     ctx.moveTo(tx, ty - 7); ctx.lineTo(tx, ty + 7)
                     ctx.stroke()
                     if (root.target.theta !== undefined)
-                        drawHeading(ctx, tx, ty, root.target.theta, 16, 2, "#98c379", true)
+                        drawHeading(ctx, tx, ty, root.target.theta, 16, 2, "#3d8025", true)
                 }
 
                 // drag preview: arrow from press point along the drag
@@ -190,7 +206,7 @@ Item {
                     var dlen = Math.hypot(mouseArea.dragPos.x - sx0,
                                           mouseArea.dragPos.y - sy0)
                     drawHeading(ctx, sx0, sy0, ang, Math.max(dlen, 10), 2,
-                                dlen >= mouseArea.dragThresholdPx ? "#98c379" : "#5c6370",
+                                dlen >= mouseArea.dragThresholdPx ? "#3d8025" : "#5c6370",
                                 true)
                 }
 
@@ -260,6 +276,7 @@ Item {
                           root.robot.y.toFixed(2) + ", " +
                           root.robot.theta.toFixed(2); color: "#333333" }
             Label { text: "Path points: " + root.path.length; color: "#333333" }
+            Label { text: "Scan hits: " + root.scan.length; color: "#2b90d9" }
             Label {
                 objectName: "statusLabel"
                 color: "#333333"
@@ -286,8 +303,8 @@ Item {
                 wrapMode: Text.WordWrap
                 color: "#555555"
                 text: "LMB press — target at press point\nLMB drag — face along the drag\n" +
-                      "RMB — drop an obstacle\n(obstacles expire after keep_points_ms)\n\n" +
-                      "Ticks: path point theta\nOrange arrow: local planner's pick"
+                      "RMB — drop an obstacle\n(sim: lidar discovers it; else a\ntemporary costmap point)\n\n" +
+                      "Blue dots: lidar scan hits\nTicks: path point theta\nOrange arrow: local planner's pick"
             }
             Item { Layout.fillHeight: true }
         }

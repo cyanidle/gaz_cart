@@ -1,2 +1,4 @@
-1) Websocket json - warn on binary (or support)
-2) DummyWorker
+1) Websocket json - warn on binary inside msg (or better even - support?)
+2) cmd_vel support
+3) lidar support
+4) lidar input emulation

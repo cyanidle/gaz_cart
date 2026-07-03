@@ -140,3 +140,75 @@ function GlobalPlanner(cfg) end
 ---@param cfg LocalPlannerConfig
 ---@return LocalPlanner
 function LocalPlanner(cfg) end
+
+-- ---- Lidar -------------------------------------------------------------------
+
+---Segment detector params (bigbang's ObjectDetection): a run of consecutive,
+---close-together beam hits becomes one obstacle.
+---@class ObjectDetectionConfig
+---@field min_points integer? -- min beams in a run to accept it (default 3)
+---@field split_each integer? -- force a break after this many beams (default 60)
+---@field max_dist number? -- ignore hits farther than this from the robot, m (default 3.5)
+---@field max_dist_between_dots number? -- consecutive-hit gap that breaks a run, m (default 0.05)
+---@field start_ttl number? -- ms an object lives after it was last seen (default 800)
+---@field map_ttl_coeff number? -- ttl scaling applied when handed to the costmap (default 0.8)
+---@field max_deviation number? -- cross-scan dedup radius, m (default 0.02)
+---@field min_x number? -- object accept bounds, m (defaults -3/5/-3/6)
+---@field max_x number?
+---@field min_y number?
+---@field max_y number?
+
+---A ground-truth circle the built-in simulator raycasts against.
+---@class SimObstacle
+---@field x number?
+---@field y number?
+---@field radius number? -- m (default 0.1)
+
+---Simulation backend. Its presence selects sim mode (no hardware); absence
+---means the real RPLidar device is opened.
+---@class LidarSimConfig
+---@field beams integer? -- rays per revolution (default 360)
+---@field noise number? -- range noise amplitude, m (default 0.005)
+---@field obstacles SimObstacle[]? -- initial ground-truth obstacles
+
+---@class LidarSerialConfig
+---@field port string? -- serial device (default "/dev/ttyUSB0")
+---@field baud integer? -- baud rate (default 256000)
+
+---@class LidarNetworkConfig
+---@field host string? -- device host (default "192.168.1.25")
+---@field port integer? -- device port (default 20108)
+---@field use_tcp boolean? -- TCP vs UDP channel (default true)
+
+---@class LidarConfig : WorkerConfig
+---@field range_min number? -- discard hits nearer than this, m (default 0.15)
+---@field range_max number? -- discard hits farther than this, m (default 12.0)
+---@field reversed boolean? -- scan arrives clockwise (default true)
+---@field lidar_offset number? -- sensor yaw mount offset, rad (default 0)
+---@field lidar_x_offset number? -- sensor x mount offset, m (default 0)
+---@field lidar_y_offset number? -- sensor y mount offset, m (default 0)
+---@field range_correction number? -- added to every range, m (default 0)
+---@field source_id integer? -- source_id stamped on emitted MapObjects (default 0)
+---@field scan_frequency number? -- Hz; sim tick rate / motor RPM (default 10)
+---@field scan_mode string? -- hardware scan mode ("" = driver's first)
+---@field use_serial boolean? -- serial vs network hardware channel (default true)
+---@field grab_with_interval boolean? -- use getScanDataWithIntervalHq (default false)
+---@field objects ObjectDetectionConfig?
+---@field serial LidarSerialConfig?
+---@field network LidarNetworkConfig?
+---@field sim LidarSimConfig? -- present => simulate instead of using hardware
+
+---@class Lidar : Worker
+---@field Reload fun(self: Lidar, cfg: LidarConfig): boolean -- re-apply a full config table (defaults re-applied)
+
+---RPLidar-driven obstacle detector (port of bigbang's rplidarnode). Parses each
+---beam to a world point using the latest pose, segments them into objects, and
+---emits them as the costmap's `objects` list.
+---Input fields:  `position` (NavPose), `scan` (inject a raw scan: number[] of
+---ranges, or { angle, range }[]), `sim_obstacle` (SimObstacle, sim mode),
+---`clear_sim` (any non-nil: drop sim obstacles).
+---Output (data channel), per scan: `objects` (MapObject[] for the costmap),
+---`scan` ({ pose: NavPose, points: {x,y}[] } world-frame hits, for the GUI).
+---@param cfg LidarConfig
+---@return Lidar
+function Lidar(cfg) end

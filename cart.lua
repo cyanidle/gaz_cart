@@ -17,7 +17,8 @@ local config_defs = require "mods.config_defs"
 
 local CAN_DEVICE    = args[1] or "can0"   -- socketcan interface the modules sit on
 local ROS_PLUGIN_DIR = args[2]  -- optional: dir with radapter_ros; enables ROS cmd_vel
-local NODE_ID       = 100      -- this Pi's Cyphal node id
+local SIM           = true      -- sim robot + sim lidar instead of real hardware
+local NODE_ID       = 100       -- this Pi's Cyphal node id
 local WS_PORT       = 6080     -- config-GUI websocket (gui.lua connects here)
 local TRACK_WIDTH   = 0.30     -- distance between left and right wheels, m
 local ODO_PERIOD_MS = 20       -- odometry integration period
@@ -206,8 +207,9 @@ local odo = require "nodes.odo" {
 
 require "nodes.nav" {
     model = node(ws, "nav"),
-    drive = drive,                          -- cmd_vel -> wheel twist
-    pose  = function() return odo:pose() end, -- odometry -> planner `position`
+    sim   = SIM,
+    drive = not SIM and drive or nil,
+    pose  = not SIM and function() return odo:pose() end or nil,
 }
 
 -- Optional external drive source: a ROS 2 stack publishing cmd_vel (Twist).
@@ -220,12 +222,3 @@ if ROS_PLUGIN_DIR then
 end
 
 log.info("cart up: node {} on {}, ws on :{}", NODE_ID, CAN_DEVICE, WS_PORT)
-
-return {
-    drive = drive,
-    stop = stop,
-    set_speed = set_speed,
-    set_config = set_config,
-    direct_voltage = direct_voltage,
-    odo = odo,
-}

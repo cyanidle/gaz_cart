@@ -6,10 +6,10 @@
 --    left click  — set the planner target (build & follow a path)
 --    right click — drop a temporary obstacle into the costmap
 --
---  Robot loop, selected by whether cfg.drive is given:
---    real  — cfg.pose() feeds odometry into `position`; LocalPlanner's cmd_vel
+--  Robot loop, selected by cfg.sim:
+--    false — cfg.pose() feeds odometry into `position`; LocalPlanner's cmd_vel
 --            is scaled to a body twist and handed to cfg.drive(v, omega).
---    sim   — a simulated robot integrates cmd_vel in place, so the whole loop
+--    true  — a simulated robot integrates cmd_vel in place, so the whole loop
 --            runs without hardware (used when nav is wired standalone).
 -- =============================================================================
 
@@ -20,14 +20,33 @@ local MAX_ROT_SPD  = 1.5 -- rad/s at cmd_vel = 1
 local UPDATE_MS    = 50
 local ROBOT_RADIUS = 0.1
 
+-- Ground-truth obstacles the simulated lidar raycasts against (world meters).
+-- Seeded so the NAV tab shows the lidar discovering obstacles on start-up;
+-- right-clicking the map adds more (see the model handler below).
+local SIM_OBSTACLES = {
+    { x = 1.0, y = 1.0, radius = 0.12 },
+    { x = 1.4, y = 2.0, radius = 0.10 },
+    { x = 0.6, y = 1.6, radius = 0.15 },
+}
+local SIM_OBSTACLE_RADIUS = 0.1 -- radius for obstacles dropped via right-click
+
 ---@class NavConfig
 ---@field model Pipable GUI model node from node(); sends wrapped, receives unwrapped
----@field drive fun(v: number, omega: number)? body twist sink (m/s, rad/s); its presence selects real mode
----@field pose fun(): number, number, number? robot pose source x, y, theta (required with drive)
+---@field sim boolean? -- default false; sim robot + sim lidar instead of real hardware
+---@field drive (fun(v: number, omega: number))? body twist sink (m/s, rad/s); required when sim=false
+---@field pose (fun(): number, number, number)? robot pose source x, y, theta; required when sim=false
+---@field lidar_port string? serial device of a real RPLidar (ignored when sim=true)
 
 ---Wire the navigation stack.
 ---@param cfg NavConfig
 return function(cfg)
+    local sim = cfg.sim
+
+    if not sim then
+        assert(cfg.drive, "cfg.drive required when sim=false")
+        assert(cfg.pose, "cfg.pose required when sim=false")
+    end
+
     local costmap = CostmapServer {
         name = "costmap_server",
         update_rate_ms = 100,
@@ -50,6 +69,24 @@ return function(cfg)
         margins = { position = 0.03, theta = 0.05 },
     }
 
+    -- Lidar: sim mode gets a raycasting emulator; real mode uses a hardware
+    -- RPLidar when lidar_port is given. Detected obstacles feed the costmap;
+    -- the raw scan goes to the GUI for visualization.
+    local lidar
+    if sim then
+        lidar = Lidar {
+            name = "lidar",
+            scan_frequency = 12,
+            sim = { beams = 360, obstacles = SIM_OBSTACLES },
+        }
+    elseif cfg.lidar_port then
+        lidar = Lidar { name = "lidar", serial = { port = cfg.lidar_port } }
+    end
+    if lidar then
+        pipe(lidar, costmap)
+        pipe(lidar, function(m) return { scan = m.scan } end, cfg.model)
+    end
+
     pipe(costmap, gp)
     pipe(costmap, lp)
     pipe(gp, lp) -- path
@@ -65,7 +102,15 @@ return function(cfg)
             gp { target = msg.target }
         end
         if msg.obstacle then
-            costmap { point = msg.obstacle }
+            -- With a simulated lidar, dropped obstacles are ground truth the
+            -- sensor discovers; otherwise they go straight into the costmap.
+            if sim then
+                lidar { sim_obstacle = {
+                    x = msg.obstacle.x, y = msg.obstacle.y, radius = SIM_OBSTACLE_RADIUS,
+                } }
+            else
+                costmap { point = msg.obstacle }
+            end
         end
         if msg.cancel then
             lp { cancel = true }
@@ -80,9 +125,10 @@ return function(cfg)
         gp(msg)
         lp(msg)
         cfg.model(msg)
+        if lidar then lidar(msg) end
     end
 
-    if cfg.drive then
+    if not sim then
         -- Real robot: odometry pose in, cmd_vel out to the drivetrain. cmd.y is
         -- ignored — a diff cart can't strafe (LocalPlanner defaults to diff mode).
         on(lp, "cmd_vel", function(c)
