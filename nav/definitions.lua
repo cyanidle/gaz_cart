@@ -92,13 +92,27 @@ function GlobalPlanner(cfg) end
 ---@field approximation_max_cost number? -- max cell cost on the shortcut to a candidate (default 30.0)
 ---@field fallback_min_points_count integer? -- min points to keep when no candidate passes (default 3)
 
----@class DriveConfig
----@field min_speed_coeff number? -- floor of the speed scale (default 0.4)
----@field min_rotation_spd number? -- rad/s floor while rotating (default 0.3)
----@field full_rot_spd_per_radians number? -- full rotation speed at this heading error (default 2.0)
----@field enable_mid_path_rotation boolean? -- rotate toward path theta while driving (default true)
+---Holonomic (omni-wheel) mode — set under `drive.omni_drive` to select it.
+---@class OmniDriveConfig
+---@field enable_mid_path_rotation boolean? -- rotate toward path theta while strafing (default true)
 ---@field max_radians_per_meter number? -- rotation budget per meter driven (default 1.0)
----@field max_speed_for_meters number? -- full speed at this remaining distance (default 0.5)
+
+---Differential (tank) mode — set under `drive.diff_drive` to select it (the default).
+---@class DiffDriveConfig
+---@field heading_kp number? -- turn rate (fraction of full) per rad of heading error (default 1.5)
+---@field turn_in_place_angle number? -- rad; above this heading error, stop and rotate in place (default 0.8)
+---@field allow_reverse boolean? -- drive backward toward targets behind the robot (default false)
+
+---Motion params common to both drive modes plus the two optional mode blocks.
+---Exactly one of `diff_drive` / `omni_drive` selects the kinematics; if neither
+---is given, `diff_drive` is the default. Setting both raises.
+---@class DriveConfig
+---@field min_speed_coeff number? -- forward-speed floor, fraction of full (default 0.4)
+---@field min_rotation_spd number? -- in-place rotation floor, fraction of full (default 0.3)
+---@field full_rot_spd_per_radians number? -- in-place rotation gain, 1/rad (default 2.0)
+---@field max_speed_for_meters number? -- distance at which forward speed saturates, m (default 0.5)
+---@field diff_drive DiffDriveConfig? -- present => differential (tank) mode
+---@field omni_drive OmniDriveConfig? -- present => holonomic (omni) mode
 
 ---@class LocalPlannerConfig : WorkerConfig
 ---@field tick_rate number? -- control loop rate, Hz (default 12.0)

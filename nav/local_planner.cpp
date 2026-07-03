@@ -27,6 +27,8 @@
 // re-applies a full config table.
 
 #include <QTimer>
+#include <algorithm>
+#include <optional>
 #include <vector>
 
 #include "radapter/radapter.hpp"
@@ -59,21 +61,48 @@ RAD_DESCRIBE(PathConfig) {
     RAD_MEMBER(fallback_min_points_count);
 }
 
-struct DriveConfig {
-    WithDefault<double> min_speed_coeff = 0.4;
-    WithDefault<double> min_rotation_spd = 0.3;
-    WithDefault<double> full_rot_spd_per_radians = 2.0;
+// Holonomic (omni-wheel) mode: strafes straight at the target, optionally
+// slewing toward the path point's heading as it goes.
+struct OmniDriveConfig {
     WithDefault<bool> enable_mid_path_rotation = true;
     WithDefault<double> max_radians_per_meter = 1.0;
-    WithDefault<double> max_speed_for_meters = 0.5;
+};
+RAD_DESCRIBE(OmniDriveConfig) {
+    RAD_MEMBER(enable_mid_path_rotation);
+    RAD_MEMBER(max_radians_per_meter);
+}
+
+// Differential (tank) mode: turns the body to face the target, then drives
+// forward; never strafes (cmd.y stays 0).
+struct DiffDriveConfig {
+    WithDefault<double> heading_kp = 1.5;          // turn rate (fraction of full) per rad of heading error
+    WithDefault<double> turn_in_place_angle = 0.8; // rad; above this error, stop and rotate in place
+    WithDefault<bool> allow_reverse = false;       // drive backward toward targets behind the robot
+};
+RAD_DESCRIBE(DiffDriveConfig) {
+    RAD_MEMBER(heading_kp);
+    RAD_MEMBER(turn_in_place_angle);
+    RAD_MEMBER(allow_reverse);
+}
+
+// Motion params common to both modes, plus the two optional mode blocks.
+// Exactly one of diff_drive / omni_drive selects the kinematics; if neither is
+// given, diff_drive is the default. Setting both is an error (see apply()).
+struct DriveConfig {
+    WithDefault<double> min_speed_coeff = 0.4;          // forward-speed floor, fraction of full
+    WithDefault<double> min_rotation_spd = 0.3;         // in-place rotation floor, fraction of full
+    WithDefault<double> full_rot_spd_per_radians = 2.0; // in-place rotation gain, 1/rad
+    WithDefault<double> max_speed_for_meters = 0.5;     // distance at which forward speed saturates, m
+    std::optional<DiffDriveConfig> diff_drive;          // present => differential (tank) mode
+    std::optional<OmniDriveConfig> omni_drive;          // present => holonomic (omni) mode
 };
 RAD_DESCRIBE(DriveConfig) {
     RAD_MEMBER(min_speed_coeff);
     RAD_MEMBER(min_rotation_spd);
     RAD_MEMBER(full_rot_spd_per_radians);
-    RAD_MEMBER(enable_mid_path_rotation);
-    RAD_MEMBER(max_radians_per_meter);
     RAD_MEMBER(max_speed_for_meters);
+    RAD_MEMBER(diff_drive);
+    RAD_MEMBER(omni_drive);
 }
 
 struct LocalPlannerConfig : WorkerConfig {
@@ -154,6 +183,14 @@ private:
         if (config.tick_rate.value <= 0) {
             Raise("LocalPlanner: tick_rate must be > 0");
         }
+        auto& d = config.drive.value;
+        if (d.diff_drive && d.omni_drive) {
+            Raise("LocalPlanner: set only one of drive.diff_drive / drive.omni_drive");
+        }
+        if (!d.diff_drive && !d.omni_drive) {
+            d.diff_drive = DiffDriveConfig{}; // differential is the default mode
+        }
+        Info("drive mode: {}", d.diff_drive ? "differential" : "holonomic");
         tickInterval = 1.0 / config.tick_rate;
         status = {};
         tickTimer->start(int(tickInterval * 1000));
@@ -237,14 +274,28 @@ private:
         double theta = 0;
     };
 
-    Cmd driveCmd() const {
-        Cmd cmd;
+    // Distance-based forward-speed scale, shared by both modes: full speed
+    // beyond max_speed_for_meters, easing to the min_speed_coeff floor as the
+    // target gets close.
+    double distCoeff() const {
         auto dx = target.x - position.x;
         auto dy = target.y - position.y;
         auto dist = std::sqrt(dx * dx + dy * dy);
-        auto distCoeff = dist / drive().max_speed_for_meters;
-        distCoeff = std::min(distCoeff, 1.0);
-        distCoeff = std::max(distCoeff, drive().min_speed_coeff.value);
+        auto coeff = std::min(dist / drive().max_speed_for_meters, 1.0);
+        return std::max(coeff, drive().min_speed_coeff.value);
+    }
+
+    // apply() guarantees exactly one mode block is set.
+    Cmd driveCmd() const {
+        return drive().diff_drive ? diffDriveCmd() : holonomicDriveCmd();
+    }
+
+    Cmd holonomicDriveCmd() const {
+        Cmd cmd;
+        auto const& omni = *drive().omni_drive;
+        auto dx = target.x - position.x;
+        auto dy = target.y - position.y;
+        auto dist = std::sqrt(dx * dx + dy * dy);
         // rotate the world-frame direction into the body frame, normalize, scale
         auto cosT = std::cos(-position.theta);
         auto sinT = std::sin(-position.theta);
@@ -252,15 +303,40 @@ private:
         auto by = dx * sinT + dy * cosT;
         auto norm = std::sqrt(bx * bx + by * by);
         if (norm > 0) {
-            cmd.x = bx / norm * distCoeff;
-            cmd.y = by / norm * distCoeff;
+            cmd.x = bx / norm * distCoeff();
+            cmd.y = by / norm * distCoeff();
         }
-        if (drive().enable_mid_path_rotation) {
+        if (omni.enable_mid_path_rotation) {
             cmd.theta = nav::normalizedTheta(nav::normalizedTheta(target.theta) -
                                              nav::normalizedTheta(position.theta))
-                        * dist / drive().max_radians_per_meter;
+                        * dist / omni.max_radians_per_meter;
         }
         return cmd;
+    }
+
+    // Tank control: turn the body toward the target, drive forward only once
+    // roughly aligned (fading out to a pure in-place turn past turn_in_place_angle),
+    // never strafe.
+    Cmd diffDriveCmd() const {
+        Cmd cmd;
+        auto const& diff = *drive().diff_drive;
+        auto dx = target.x - position.x;
+        auto dy = target.y - position.y;
+        auto bearing = std::atan2(dy, dx);
+        auto headingErr = nav::normalizedTheta(bearing - position.theta);
+        double forwardSign = 1.0;
+        if (diff.allow_reverse && std::abs(headingErr) > M_PI / 2) {
+            // target is behind: back into it instead of turning ~180 degrees
+            headingErr = nav::normalizedTheta(headingErr - M_PI);
+            forwardSign = -1.0;
+        }
+        cmd.theta = std::clamp(diff.heading_kp.value * headingErr, -1.0, 1.0);
+        auto absErr = std::abs(headingErr);
+        if (absErr < diff.turn_in_place_angle.value) {
+            auto align = 1.0 - absErr / diff.turn_in_place_angle.value;
+            cmd.x = forwardSign * distCoeff() * align;
+        }
+        return cmd; // cmd.y stays 0 — a tank cannot strafe
     }
 
     Cmd rotateCmd() const {
