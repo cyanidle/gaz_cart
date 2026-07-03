@@ -6,20 +6,24 @@
 --    left click  — set the planner target (build & follow a path)
 --    right click — drop a temporary obstacle into the costmap
 --
---  A simulated robot integrates LocalPlanner's cmd_vel so the whole loop runs
---  without hardware. On the real cart, replace the "Simulated robot" block:
---  feed odometry into `position` and pass cmd_vel to cart.lua's drive().
+--  Robot loop, selected by whether cfg.drive is given:
+--    real  — cfg.pose() feeds odometry into `position`; LocalPlanner's cmd_vel
+--            is scaled to a body twist and handed to cfg.drive(v, omega).
+--    sim   — a simulated robot integrates cmd_vel in place, so the whole loop
+--            runs without hardware (used when nav is wired standalone).
 -- =============================================================================
 
 load_plugin(SCRIPT_DIR .. "/../build/nav/libgaz_nav")
 
 local MAX_LIN_SPD  = 0.5 -- m/s at cmd_vel = 1
 local MAX_ROT_SPD  = 1.5 -- rad/s at cmd_vel = 1
-local SIM_MS       = 50
+local UPDATE_MS    = 50
 local ROBOT_RADIUS = 0.1
 
 ---@class NavConfig
 ---@field model Pipable GUI model node from node(); sends wrapped, receives unwrapped
+---@field drive fun(v: number, omega: number)? body twist sink (m/s, rad/s); its presence selects real mode
+---@field pose fun(): number, number, number? robot pose source x, y, theta (required with drive)
 
 ---Wire the navigation stack.
 ---@param cfg NavConfig
@@ -51,13 +55,6 @@ return function(cfg)
     pipe(gp, lp) -- path
     pipe(lp, gp) -- status feedback (finishes the target once idle)
 
-    -- ---- Simulated robot -----------------------------------------------------
-
-    local pos = { x = 0.3, y = 0.3, theta = 0 }
-    local cmd = { x = 0, y = 0, theta = 0 }
-
-    on(lp, "cmd_vel", function(c) cmd = c end)
-
     -- ---- GUI -------------------------------------------------------------------
     pipe(costmap, cfg.model) -- costmap bytes
     pipe(gp, cfg.model)      -- path
@@ -76,16 +73,37 @@ return function(cfg)
         end
     end)
 
-    each(SIM_MS, function()
-        local dt = SIM_MS / 1000
-        local c, s = math.cos(pos.theta), math.sin(pos.theta)
-        pos.x = pos.x + (cmd.x * c - cmd.y * s) * MAX_LIN_SPD * dt
-        pos.y = pos.y + (cmd.x * s + cmd.y * c) * MAX_LIN_SPD * dt
-        pos.theta = pos.theta + cmd.theta * MAX_ROT_SPD * dt
-
+    -- ---- Robot loop ------------------------------------------------------------
+    -- Publish the current pose to both planners and the GUI, at UPDATE_MS.
+    local function publish_pose(pos)
         local msg = { position = pos }
         gp(msg)
         lp(msg)
         cfg.model(msg)
-    end)
+    end
+
+    if cfg.drive then
+        -- Real robot: odometry pose in, cmd_vel out to the drivetrain. cmd.y is
+        -- ignored — a diff cart can't strafe (LocalPlanner defaults to diff mode).
+        on(lp, "cmd_vel", function(c)
+            cfg.drive(c.x * MAX_LIN_SPD, c.theta * MAX_ROT_SPD)
+        end)
+        each(UPDATE_MS, function()
+            local x, y, theta = cfg.pose()
+            publish_pose { x = x, y = y, theta = theta }
+        end)
+    else
+        -- Simulated robot: integrate cmd_vel in place (no hardware).
+        local pos = { x = 0.3, y = 0.3, theta = 0 }
+        local cmd = { x = 0, y = 0, theta = 0 }
+        on(lp, "cmd_vel", function(c) cmd = c end)
+        each(UPDATE_MS, function()
+            local dt = UPDATE_MS / 1000
+            local c, s = math.cos(pos.theta), math.sin(pos.theta)
+            pos.x = pos.x + (cmd.x * c - cmd.y * s) * MAX_LIN_SPD * dt
+            pos.y = pos.y + (cmd.x * s + cmd.y * c) * MAX_LIN_SPD * dt
+            pos.theta = pos.theta + cmd.theta * MAX_ROT_SPD * dt
+            publish_pose(pos)
+        end)
+    end
 end

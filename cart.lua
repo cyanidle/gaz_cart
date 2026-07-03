@@ -16,6 +16,7 @@ local config_defs = require "mods.config_defs"
 -- ---- Tunables --------------------------------------------------------------
 
 local CAN_DEVICE    = args[1] or "can0"   -- socketcan interface the modules sit on
+local ROS_PLUGIN_DIR = args[2]  -- optional: dir with radapter_ros; enables ROS cmd_vel
 local NODE_ID       = 100      -- this Pi's Cyphal node id
 local WS_PORT       = 6080     -- config-GUI websocket (gui.lua connects here)
 local TRACK_WIDTH   = 0.30     -- distance between left and right wheels, m
@@ -205,7 +206,18 @@ local odo = require "nodes.odo" {
 
 require "nodes.nav" {
     model = node(ws, "nav"),
+    drive = drive,                          -- cmd_vel -> wheel twist
+    pose  = function() return odo:pose() end, -- odometry -> planner `position`
 }
+
+-- Optional external drive source: a ROS 2 stack publishing cmd_vel (Twist).
+-- Only one of this and the internal nav planner should run at a time.
+if ROS_PLUGIN_DIR then
+    require "nodes.ros" {
+        drive = drive,
+        plugin_dir = ROS_PLUGIN_DIR,
+    }
+end
 
 log.info("cart up: node {} on {}, ws on :{}", NODE_ID, CAN_DEVICE, WS_PORT)
 
