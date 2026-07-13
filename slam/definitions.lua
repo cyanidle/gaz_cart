@@ -2,8 +2,8 @@
 -- Lua LSP definitions for build/slam/libgaz_slam.
 
 ---@class SlamMapConfig
----@field width integer? fixed output-grid width (default 101)
----@field height integer? fixed output-grid height (default 151)
+---@field width integer? deprecated compatibility field; dynamic Karto bounds are used
+---@field height integer? deprecated compatibility field; dynamic Karto bounds are used
 ---@field resolution number? meters per cell (default 0.02)
 ---@field update_interval_ms integer? occupancy-map publish period (default 1000)
 ---@field min_pass_through integer? beams required before classifying a cell (default 2)
@@ -101,7 +101,8 @@
 ---Online Karto/Ceres SLAM worker.
 ---Input: `odometry` (NavPose), `scan` (the Lidar worker's LaserScan-shaped
 ---payload), `pause` (bool), and `reset` (any non-nil).
----Output: `position` (map-corrected pose), `map` (GAMP occupancy bytes),
+---Output: `position` (map-corrected pose), `map` (origin-aware, dynamically
+---bounded GAMP occupancy bytes; 0 free, 100 occupied, 255 unknown),
 ---`scan` (corrected world-frame hit points), `covariance`, and `slam` stats.
 ---@param cfg SlamConfig
 ---@return Slam

@@ -228,7 +228,7 @@ private:
     // Cost of the straight cell-line between two points (Bresenham-ish walk).
     double lineCost(nav::Position const& start, nav::Position const& end) const {
         if (costmap.isEmpty()) return 0;
-        auto d = costmap.metersToCells(end.x - start.x, end.y - start.y);
+        auto d = costmap.metersDeltaToCells(end.x - start.x, end.y - start.y);
         auto startCell = costmap.metersToCells(start.x, start.y);
         auto endCell = costmap.metersToCells(end.x, end.y);
         int bigger;

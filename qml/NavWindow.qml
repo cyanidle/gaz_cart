@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 
-// Standalone navigation window — costmap, path, click-to-plan.
+// Standalone navigation window — costmap, manual positioning, and planning.
 ApplicationWindow {
     id: root
     visible: true

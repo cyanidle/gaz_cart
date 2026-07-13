@@ -2,14 +2,14 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// Costmap visualization + click-to-plan.
+// Costmap visualization + manual positioning + click-to-plan.
 // Reinterprets CostmapServer's raw buffer (GridHeader + cells, see
 // nav_common.hpp) straight from the message bytes — no repacking anywhere.
 //
-// Left press-drag-release: target at the press point, facing along the drag.
-// A plain left click keeps the robot's current heading. Right click drops a
-// temporary obstacle. Small ticks show each global-path point's theta; the
-// big orange arrow is the point the local planner is currently driving to.
+// A plain left click sets a planner target while retaining the robot heading;
+// Shift+left-click repositions the robot. Left press-drag-release sets a target
+// at the press point facing along the drag. Right click drops an obstacle.
+// Small ticks show path headings; the orange arrow is the next local target.
 
 Item {
     id: root
@@ -17,6 +17,8 @@ Item {
     property int gridW: 0
     property int gridH: 0
     property real gridRes: 0.02
+    property real gridOriginX: 0
+    property real gridOriginY: 0
     property var model: null  // radapter.model.branch("nav") — set by Main.qml
     property var cells: null     // Uint8Array over the costmap buffer
     property var path: []
@@ -37,7 +39,15 @@ Item {
             root.gridW = dv.getInt32(4, true)
             root.gridH = dv.getInt32(8, true)
             root.gridRes = dv.getFloat32(12, true)
-            root.cells = new Uint8Array(msg.costmap, 16)
+            var cellCount = root.gridW * root.gridH
+            var headerSize = dv.byteLength === 24 + cellCount ? 24 : 16
+            if (dv.byteLength !== headerSize + cellCount) {
+                console.warn("costmap: invalid buffer size")
+                return
+            }
+            root.gridOriginX = headerSize === 24 ? dv.getFloat32(16, true) : 0
+            root.gridOriginY = headerSize === 24 ? dv.getFloat32(20, true) : 0
+            root.cells = new Uint8Array(msg.costmap, headerSize, cellCount)
             canvas.requestPaint()
         }
         if (msg.path !== undefined) {
@@ -84,10 +94,20 @@ Item {
             property real cellPx: root.gridW > 0
                 ? Math.min(width / root.gridW, height / root.gridH) : 1
 
-            function toScreenX(mx) { return mx / root.gridRes * cellPx }
-            function toScreenY(my) { return root.gridH * cellPx - my / root.gridRes * cellPx }
-            function toMetersX(sx) { return sx / cellPx * root.gridRes }
-            function toMetersY(sy) { return (root.gridH * cellPx - sy) / cellPx * root.gridRes }
+            function toScreenX(mx) {
+                return (mx - root.gridOriginX) / root.gridRes * cellPx
+            }
+            function toScreenY(my) {
+                return root.gridH * cellPx
+                    - (my - root.gridOriginY) / root.gridRes * cellPx
+            }
+            function toMetersX(sx) {
+                return root.gridOriginX + sx / cellPx * root.gridRes
+            }
+            function toMetersY(sy) {
+                return root.gridOriginY
+                    + (root.gridH * cellPx - sy) / cellPx * root.gridRes
+            }
 
             // heading tick/arrow at screen point (sx, sy); theta is world-frame
             // (y up), screen y grows down, hence the minus on sin
@@ -128,7 +148,8 @@ Item {
                     for (var x = 0; x < w; ++x) {
                         var cost = root.cells[row + x]
                         if (!cost) continue
-                        ctx.fillStyle = cost >= 100 ? "#e06c75"
+                        ctx.fillStyle = cost === 255 ? "#25282b"
+                            : cost >= 100 ? "#e06c75"
                             : Qt.rgba(0.9, 0.75 - 0.5 * cost / 100, 0.2, 0.25 + 0.6 * cost / 100)
                         ctx.fillRect(x * px, sy, px + 0.5, px + 0.5)
                     }
@@ -228,14 +249,17 @@ Item {
                 anchors.fill: parent
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
 
-                // Target = press point; drag past the threshold to command
-                // theta along the drag, otherwise keep the robot's heading.
+                // Shift+click adjusts the robot pose. A plain click sets a
+                // target; drag past the threshold to command its final heading.
                 readonly property real dragThresholdPx: 10
-                property var pressPos: null // { x, y, button }
+                property var pressPos: null // { x, y, button, modifiers }
                 property var dragPos: null
 
                 onPressed: function (mouse) {
-                    pressPos = { x: mouse.x, y: mouse.y, button: mouse.button }
+                    pressPos = {
+                        x: mouse.x, y: mouse.y, button: mouse.button,
+                        modifiers: mouse.modifiers,
+                    }
                     dragPos = null
                 }
                 onPositionChanged: function (mouse) {
@@ -255,11 +279,20 @@ Item {
                     } else {
                         var dx = mouse.x - press.x
                         var dy = mouse.y - press.y
-                        var theta = Math.hypot(dx, dy) >= dragThresholdPx
-                            ? Math.atan2(-dy, dx) // screen y down -> world y up
-                            : root.robot.theta
-                        root.target = { x: mx, y: my, theta: theta }
-                        model.send({ target: root.target })
+                        var dragged = Math.hypot(dx, dy) >= dragThresholdPx
+                        var reposition = !dragged
+                            && (press.modifiers & Qt.ShiftModifier) !== 0
+                        if (reposition) {
+                            root.target = null
+                            root.robot = { x: mx, y: my, theta: root.robot.theta }
+                            model.send({ reposition: root.robot })
+                        } else {
+                            var theta = dragged
+                                ? Math.atan2(-dy, dx) // screen y down -> world y up
+                                : root.robot.theta
+                            root.target = { x: mx, y: my, theta: theta }
+                            model.send({ target: root.target })
+                        }
                     }
                     canvas.requestPaint()
                 }
@@ -276,6 +309,8 @@ Item {
 
             Label { text: "Costmap: " + root.gridW + "×" + root.gridH + " @ " +
                           root.gridRes.toFixed(3) + " m"; color: "#333333" }
+            Label { text: "Origin: " + root.gridOriginX.toFixed(2) + ", " +
+                          root.gridOriginY.toFixed(2); color: "#333333" }
             Label { text: "Robot: " + root.robot.x.toFixed(2) + ", " +
                           root.robot.y.toFixed(2) + ", " +
                           root.robot.theta.toFixed(2); color: "#333333" }
@@ -313,7 +348,8 @@ Item {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: "#555555"
-                text: "LMB press — target at press point\nLMB drag — face along the drag\n" +
+                text: "LMB click — set target\nLMB drag — set target + heading\n" +
+                      "Shift+LMB — reposition robot\n" +
                       "RMB — drop an obstacle\n(sim: lidar discovers it; else a\ntemporary costmap point)\n\n" +
                       "Blue dots: lidar scan hits\nTicks: path point theta\nOrange arrow: local planner's pick"
             }

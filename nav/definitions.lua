@@ -20,10 +20,10 @@
 ---@field update_rate_ms integer? -- costmap publish period (default 80)
 ---@field keep_points_ms integer? -- manual `point` obstacles expire this long after the last one (default 15000)
 ---@field ignore_all_outside boolean? -- drop objects outside the grid (default true)
----@field image string? -- optional static map image, grayscale, must match width x height
----@field width integer? -- grid width, cells (default 101)
----@field height integer? -- grid height, cells (default 151)
----@field resolution number? -- meters per cell side (default 0.02)
+---@field image string? -- optional fixed static map image, grayscale, must match width x height
+---@field width integer? -- initial/fallback grid width before a SLAM map arrives (default 101)
+---@field height integer? -- initial/fallback grid height before a SLAM map arrives (default 151)
+---@field resolution number? -- initial/fallback meters per cell (default 0.02)
 ---@field inflate InflateConfig? -- inflation of dynamic obstacles
 ---@field inflate_static InflateConfig? -- inflation baked into the static map
 
@@ -42,11 +42,14 @@
 ---Costmap aggregator/publisher.
 ---Input fields:  `objects` (MapObject or MapObject[]), `point` (NavPose: manual
 ---obstacle, cleared keep_points_ms after the last one), `static_map` (a GAMP
----grid from Slam, merged and inflated with the other layers).
+---grid from Slam; its dimensions, resolution and origin are adopted dynamically,
+---then it is merged and inflated with the other layers).
 ---Output (data channel), every update_rate_ms: `costmap` — one immutable bytes
----buffer: GridHeader (magic "GAMP", width, height, resolution) + one cost byte
----(0..100) per cell, row-major (see nav/nav_common.hpp). Consumers (planners,
----QML DataView) reinterpret the buffer in place — no repacking.
+---buffer: GridHeader (magic "GAMP", width, height, resolution, origin_x,
+---origin_y) + one row-major byte per cell: 0..100 cost or 255 unknown (see
+---nav/nav_common.hpp). Unknown cells are impassable. Legacy headers without an
+---origin are accepted as origin (0, 0). Consumers (planners, QML DataView)
+---reinterpret the buffer in place — no repacking.
 ---@param cfg CostmapServerConfig
 ---@return CostmapServer
 function CostmapServer(cfg) end

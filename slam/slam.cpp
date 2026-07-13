@@ -309,15 +309,14 @@ private:
 
     void apply(SlamConfig conf) {
         config = std::move(conf);
-        if (mapConf().width.value <= 0 || mapConf().height.value <= 0 ||
-            mapConf().resolution.value <= 0 || mapConf().update_interval_ms.value <= 0) {
-            Raise("Slam: map width, height, resolution and update_interval_ms must be > 0");
+        if (mapConf().resolution.value <= 0 || mapConf().update_interval_ms.value <= 0) {
+            Raise("Slam: map resolution and update_interval_ms must be > 0");
         }
         if (config.throttle_scans.value <= 0) Raise("Slam: throttle_scans must be > 0");
         initialize();
         mapTimer->start(mapConf().update_interval_ms);
-        Info("slam: Karto/Ceres map {}x{} @ {} m, loop closing {}",
-             mapConf().width.value, mapConf().height.value, mapConf().resolution.value,
+        Info("slam: Karto/Ceres dynamic map @ {} m, loop closing {}",
+             mapConf().resolution.value,
              mapperConf().do_loop_closing.value ? "enabled" : "disabled");
     }
 
@@ -343,7 +342,9 @@ private:
         configureMapper();
         mapper->SetScanSolver(solver.get());
 
-        outputMap.reset(mapConf().width, mapConf().height, mapConf().resolution);
+        outputMap.reset(1, 1, mapConf().resolution, 0, 0, nav::Grid::UnknownCost);
+        odometry = {};
+        hasOdometry = false;
         mapToOdom = karto::Pose2{};
         hasCorrection = false;
         mapDirty = true;
@@ -405,9 +406,6 @@ private:
             scan.rangeMax <= scan.rangeMin) {
             Raise("Slam: scan needs >=2 ranges, positive angle_increment, and range_max > range_min");
         }
-        for (auto& range : scan.ranges) {
-            if (!std::isfinite(range)) range = scan.rangeMax;
-        }
         return scan;
     }
 
@@ -415,9 +413,10 @@ private:
         laser = karto::LaserRangeFinder::CreateLaserRangeFinder(
             karto::LaserRangeFinder_Custom, karto::Name("gaz_cart_lidar"));
         laser->SetOffsetPose({laserConf().x, laserConf().y, laserConf().theta});
-        laser->SetMinimumRange(std::max(scan.rangeMin, laserConf().min_range.value));
-        laser->SetRangeThreshold(std::min(scan.rangeMax, laserConf().max_range.value));
+        const auto minimumRange = std::max(scan.rangeMin, laserConf().min_range.value);
+        laser->SetMinimumRange(minimumRange);
         laser->SetMaximumRange(scan.rangeMax);
+        laser->SetRangeThreshold(std::min(scan.rangeMax, laserConf().max_range.value));
         const auto span = scan.angleIncrement * scan.ranges.size();
         const bool is360 = std::abs(span - 2 * M_PI) <= scan.angleIncrement * 1.1;
         laser->SetMinimumAngle(scan.angleMin);
@@ -526,23 +525,26 @@ private:
 
     void publishMap(bool force) {
         if (!force && !mapDirty) return;
-        outputMap.clear();
         if (processedScans > 0) {
             std::unique_ptr<karto::OccupancyGrid> occupancy(
                 karto::OccupancyGrid::CreateFromScans(
                     mapper->GetAllProcessedScans(), mapConf().resolution,
                     kt_int32u(mapConf().min_pass_through.value),
                     mapConf().occupancy_threshold.value));
-            if (occupancy) {
+            if (occupancy && occupancy->GetWidth() > 0 && occupancy->GetHeight() > 0) {
+                const auto& origin = occupancy->GetCoordinateConverter()->GetOffset();
+                outputMap.reset(occupancy->GetWidth(), occupancy->GetHeight(),
+                                occupancy->GetResolution(), origin.GetX(), origin.GetY(),
+                                nav::Grid::UnknownCost);
                 for (int y = 0; y < outputMap.height(); ++y) {
                     for (int x = 0; x < outputMap.width(); ++x) {
-                        const karto::Vector2<kt_double> world(
-                            (x + 0.5) * outputMap.resolution(),
-                            (y + 0.5) * outputMap.resolution());
-                        const auto cell = occupancy->WorldToGrid(world);
-                        if (occupancy->IsValidGridIndex(cell) &&
-                            occupancy->GetValue(cell) == karto::GridStates_Occupied) {
+                        const auto state = occupancy->GetValue({x, y});
+                        if (state == karto::GridStates_Free) {
+                            outputMap.set(x, y, 0);
+                        } else if (state == karto::GridStates_Occupied) {
                             outputMap.set(x, y, nav::Grid::MaxCost);
+                        } else {
+                            outputMap.setUnknown(x, y);
                         }
                     }
                 }

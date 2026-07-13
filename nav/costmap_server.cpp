@@ -10,7 +10,7 @@
 //
 // Output (data channel), every update_rate_ms:
 //   costmap — one immutable bytes buffer: GridHeader (magic, width, height,
-//             resolution) + one cost byte per cell (see nav_common.hpp).
+//             resolution, origin) + one cost/unknown byte per cell.
 //             Emitting shares the internal buffer — no copy; any consumer
 //             (GlobalPlanner, LocalPlanner, QML) reinterprets it in place.
 //
@@ -133,33 +133,38 @@ public:
 private:
     void apply(CostmapServerConfig conf) {
         config = std::move(conf);
-
-        nav::Grid staticMap;
-        staticMap.reset(config.width, config.height, config.resolution);
-        if (!config.image.value.isEmpty()) {
-            loadImage(staticMap);
-        }
-        clickedPoints.reset(config.width, config.height, config.resolution);
-        objectPoints.reset(config.width, config.height, config.resolution);
-        slamMap.reset(config.width, config.height, config.resolution);
-        combined.reset(config.width, config.height, config.resolution);
-        output.reset(config.width, config.height, config.resolution);
-
-        inflateRadiusCells = staticMap.radiusCells(config.inflate.value.robot_safe_radius);
-        inflateDPoints = staticMap.makeDPoints(config.inflate.value.robot_safe_radius);
-        dpointsForSizes.clear();
         objects.clear();
-
-        auto staticRadius = double(staticMap.radiusCells(config.inflate_static.value.robot_safe_radius));
-        staticInflated = staticRadius > 0
-            ? staticMap.inflated(staticMap.makeDPoints(config.inflate_static.value.robot_safe_radius), staticRadius)
-            : staticMap;
+        resetGeometry(config.width, config.height, config.resolution, 0, 0, true);
 
         resetClicked->setInterval(config.keep_points_ms);
         updateTimer->start(config.update_rate_ms);
         Info("costmap {}x{} @ {} m/cell, static image: {}",
              config.width.value, config.height.value, config.resolution.value,
              config.image.value.isEmpty() ? "<none>" : config.image.value);
+    }
+
+    void resetGeometry(int width, int height, double resolution,
+                       double originX, double originY, bool configuredImage) {
+        nav::Grid staticMap;
+        staticMap.reset(width, height, resolution, originX, originY);
+        if (configuredImage && !config.image.value.isEmpty()) loadImage(staticMap);
+
+        clickedPoints.resetLike(staticMap);
+        objectPoints.resetLike(staticMap);
+        slamMap.resetLike(staticMap);
+        combined.resetLike(staticMap);
+        output.resetLike(staticMap);
+
+        inflateRadiusCells = staticMap.radiusCells(config.inflate.value.robot_safe_radius);
+        inflateDPoints = staticMap.makeDPoints(config.inflate.value.robot_safe_radius);
+        dpointsForSizes.clear();
+
+        const auto staticRadius =
+            double(staticMap.radiusCells(config.inflate_static.value.robot_safe_radius));
+        staticInflated = staticRadius > 0
+            ? staticMap.inflated(
+                staticMap.makeDPoints(config.inflate_static.value.robot_safe_radius), staticRadius)
+            : staticMap;
     }
 
     void loadImage(nav::Grid& into) {
@@ -170,7 +175,7 @@ private:
             Raise("CostmapServer: could not read image: {}", path);
         }
         if (img.width() != into.width() || img.height() != into.height()) {
-            Raise("CostmapServer: image is {}x{}, config wants {}x{}",
+            Raise("CostmapServer: image is {}x{}, grid is {}x{}",
                   img.width(), img.height(), into.width(), into.height());
         }
         img = img.convertToFormat(QImage::Format_Grayscale8).mirrored();
@@ -194,11 +199,16 @@ private:
 
     void onStaticMap(QByteArray const& bytes) {
         auto incoming = nav::Grid::fromBytes(bytes);
-        if (incoming.width() != output.width() || incoming.height() != output.height() ||
-            std::abs(incoming.resolution() - output.resolution()) > 1e-6) {
-            Raise("CostmapServer: SLAM map is {}x{} @ {}, expected {}x{} @ {}",
+        if (!incoming.sameGeometry(output)) {
+            if (!config.image.value.isEmpty()) {
+                Raise("CostmapServer: variable SLAM geometry cannot be combined with fixed image '{}'",
+                      config.image.value);
+            }
+            resetGeometry(incoming.width(), incoming.height(), incoming.resolution(),
+                          incoming.originX(), incoming.originY(), false);
+            Debug("costmap adopted SLAM grid {}x{} @ {}, origin {},{}",
                   incoming.width(), incoming.height(), incoming.resolution(),
-                  output.width(), output.height(), output.resolution());
+                  incoming.originX(), incoming.originY());
         }
         slamMap = std::move(incoming);
     }
@@ -229,10 +239,12 @@ private:
 
     void update() {
         output = staticInflated;
+        output.addCosts(slamMap);
         updateObjects();
         combined.clear();
-        combined.addCosts(slamMap).addCosts(clickedPoints).addCosts(objectPoints);
+        combined.addCosts(clickedPoints).addCosts(objectPoints);
         if (inflateRadiusCells > 0) {
+            slamMap.inflateInto(output, inflateDPoints, inflateRadiusCells);
             combined.inflateInto(output, inflateDPoints, inflateRadiusCells);
         } else {
             output.addCosts(combined);

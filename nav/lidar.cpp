@@ -296,7 +296,12 @@ private:
         parsed.reserve(size_t(beams));
         for (int k = 0; k < beams; ++k) {
             double relTheta = 2 * M_PI * k / beams;
-            double r = raycast(worldAngle(relTheta)) + noise();
+            double r = raycast(worldAngle(relTheta));
+            // A miss is represented by exactly range_max. Applying symmetric
+            // noise to it made about half of all misses slightly smaller than
+            // range_max, turning them into a dense ring of false returns that
+            // overwhelmed Karto's scan matcher.
+            if (r < config.range_max.value) r += noise();
             appendParsed(relTheta, r);
         }
         finishScan();
@@ -473,7 +478,10 @@ private:
         QVariantList ranges;
         ranges.reserve(int(parsed.size()));
         for (auto const& n : parsed) {
-            ranges.append(std::isfinite(n.range) ? n.range : config.range_max.value);
+            // Preserve +/-inf and NaN like sensor_msgs/LaserScan does. Karto
+            // explicitly marks non-finite beams invalid; replacing them with
+            // range_max creates a ring of false scan-matching points.
+            ranges.append(n.range);
             if (std::isfinite(n.range)) {
                 points.append(QVariantMap{{"x", n.position.x}, {"y", n.position.y}});
             }

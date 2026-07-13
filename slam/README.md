@@ -32,10 +32,20 @@ The `Slam` worker accepts odometry poses plus the LaserScan-shaped `scan`
 message emitted by `gaz_nav`'s `Lidar`. It emits:
 
 - `position`: the Karto-corrected robot pose;
-- `map`: a fixed-size occupancy grid in the nav stack's `GAMP` byte format;
+- `map`: a dynamically bounded occupancy grid in the nav stack's `GAMP` byte
+  format;
 - `scan`: accepted scan endpoints in the corrected world frame;
 - `covariance` and `slam`: scan-matcher diagnostics.
 
 `nodes/nav.lua` connects this output to `CostmapServer`, both planners, and the
 GUI. `Slam:Save("path/base")` writes `path/base.posegraph` and
 `path/base.data` using Karto's serialization format.
+
+The map follows Karto's current occupancy-grid bounds and therefore grows or
+moves as new space is observed. Its 24-byte header contains `magic`, `width`,
+`height`, `resolution`, `origin_x`, and `origin_y`, followed by row-major cell
+bytes. Free cells are `0`, occupied cells are `100`, and unobserved cells are
+`255` (unknown). `CostmapServer` adopts this geometry and preserves unknown
+space, so both planners treat it as impassable until SLAM observes it as free.
+Legacy 16-byte `GAMP` maps without an origin remain readable with an implicit
+origin of `(0, 0)`.
