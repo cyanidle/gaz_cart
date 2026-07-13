@@ -14,7 +14,7 @@
 //   pause    — bool (was `monte_carlo_state.is_bad`): freeze in place while true
 //
 // Output (data channel), every tick (tick_rate Hz):
-//   cmd_vel      — { x, y, theta }: body-frame linear m/s + angular rad/s
+//   cmd_vel      — { x, y, theta }: body-frame speed fractions (-1..1)
 //                  (was `cmd_vel`, Twist)
 //   status       — { reached, rotated, is_stuck, driving_for, idle_for }
 //                  (was `planer_status`, PlanerStatus — feed back to GlobalPlanner)
@@ -65,17 +65,17 @@ RAD_DESCRIBE(PathConfig) {
 // slewing toward the path point's heading as it goes.
 struct OmniDriveConfig {
     WithDefault<bool> enable_mid_path_rotation = true;
-    WithDefault<double> max_radians_per_meter = 1.0;
+    WithDefault<double> mid_path_rotation_gain = 1.0; // speed fraction per rad·m of mid-path rotation
 };
 RAD_DESCRIBE(OmniDriveConfig) {
     RAD_MEMBER(enable_mid_path_rotation);
-    RAD_MEMBER(max_radians_per_meter);
+    RAD_MEMBER(mid_path_rotation_gain);
 }
 
 // Differential (tank) mode: turns the body to face the target, then drives
 // forward; never strafes (cmd.y stays 0).
 struct DiffDriveConfig {
-    WithDefault<double> heading_kp = 1.5;          // turn rate (fraction of full) per rad of heading error
+    WithDefault<double> heading_kp = 1.5;          // speed fraction per radian of heading error
     WithDefault<double> turn_in_place_angle = 0.8; // rad; above this error, stop and rotate in place
     WithDefault<bool> allow_reverse = false;       // drive backward toward targets behind the robot
 };
@@ -89,18 +89,18 @@ RAD_DESCRIBE(DiffDriveConfig) {
 // Exactly one of diff_drive / omni_drive selects the kinematics; if neither is
 // given, diff_drive is the default. Setting both is an error (see apply()).
 struct DriveConfig {
-    WithDefault<double> min_speed_coeff = 0.4;          // forward-speed floor, fraction of full
-    WithDefault<double> min_rotation_spd = 0.3;         // in-place rotation floor, fraction of full
-    WithDefault<double> full_rot_spd_per_radians = 2.0; // in-place rotation gain, 1/rad
-    WithDefault<double> max_speed_for_meters = 0.5;     // distance at which forward speed saturates, m
-    std::optional<DiffDriveConfig> diff_drive;          // present => differential (tank) mode
-    std::optional<OmniDriveConfig> omni_drive;          // present => holonomic (omni) mode
+    WithDefault<double> min_speed = 0.4;              // forward-speed floor, fraction of full
+    WithDefault<double> min_rotation_speed = 0.3;     // in-place rotation floor, fraction of full
+    WithDefault<double> rotation_gain = 2.0;          // in-place rotation speed fraction per radian
+    WithDefault<double> full_speed_distance = 0.5;    // distance at which forward speed saturates at 1.0, m
+    std::optional<DiffDriveConfig> diff_drive;        // present => differential (tank) mode
+    std::optional<OmniDriveConfig> omni_drive;        // present => holonomic (omni) mode
 };
 RAD_DESCRIBE(DriveConfig) {
-    RAD_MEMBER(min_speed_coeff);
-    RAD_MEMBER(min_rotation_spd);
-    RAD_MEMBER(full_rot_spd_per_radians);
-    RAD_MEMBER(max_speed_for_meters);
+    RAD_MEMBER(min_speed);
+    RAD_MEMBER(min_rotation_speed);
+    RAD_MEMBER(rotation_gain);
+    RAD_MEMBER(full_speed_distance);
     RAD_MEMBER(diff_drive);
     RAD_MEMBER(omni_drive);
 }
@@ -125,9 +125,8 @@ class LocalPlanner final : public Worker {
 
     nav::Grid costmap;
     nav::Position position;
-    nav::Position target; // lookahead point currently driven to
-    nav::Position goal;   // final path point — "done" is judged against this
-    bool goalValid = false;
+    nav::Position target;
+    std::optional<nav::Position> goal;
     std::vector<nav::Position> path;
     bool paused = false;
 
@@ -201,10 +200,10 @@ private:
         Parse(newPath, msg);
         if (newPath.empty()) {
             path.clear();
+            goal.reset();
         } else {
             path = std::move(newPath);
             goal = path.back();
-            goalValid = true;
             target = findBestTarget();
         }
     }
@@ -275,14 +274,14 @@ private:
     };
 
     // Distance-based forward-speed scale, shared by both modes: full speed
-    // beyond max_speed_for_meters, easing to the min_speed_coeff floor as the
+    // beyond full_speed_distance, easing to the min_speed floor as the
     // target gets close.
     double distCoeff() const {
         auto dx = target.x - position.x;
         auto dy = target.y - position.y;
         auto dist = std::sqrt(dx * dx + dy * dy);
-        auto coeff = std::min(dist / drive().max_speed_for_meters, 1.0);
-        return std::max(coeff, drive().min_speed_coeff.value);
+        auto coeff = std::min(dist / drive().full_speed_distance, 1.0);
+        return std::max(coeff, drive().min_speed.value);
     }
 
     // apply() guarantees exactly one mode block is set.
@@ -309,7 +308,8 @@ private:
         if (omni.enable_mid_path_rotation) {
             cmd.theta = nav::normalizedTheta(nav::normalizedTheta(target.theta) -
                                              nav::normalizedTheta(position.theta))
-                        * dist / omni.max_radians_per_meter;
+                        * dist / omni.mid_path_rotation_gain;
+            cmd.theta = std::clamp(cmd.theta, -1.0, 1.0);
         }
         return cmd;
     }
@@ -343,10 +343,11 @@ private:
         Cmd cmd;
         auto diff = nav::normalizedTheta(nav::normalizedTheta(target.theta) -
                                          nav::normalizedTheta(position.theta));
-        cmd.theta = diff / drive().full_rot_spd_per_radians;
+        cmd.theta = diff / drive().rotation_gain;
+        cmd.theta = std::clamp(cmd.theta, -1.0, 1.0);
         auto sign = diff > 0 ? 1.0 : -1.0;
-        if (std::abs(cmd.theta) > 1) cmd.theta = sign;
-        if (std::abs(cmd.theta) < drive().min_rotation_spd) cmd.theta = sign * drive().min_rotation_spd;
+        if (std::abs(cmd.theta) < drive().min_rotation_speed)
+            cmd.theta = sign * drive().min_rotation_speed;
         return cmd;
     }
 
@@ -358,9 +359,10 @@ private:
     void stPaused()   { if (status.idle_for) status.idle_for += tickInterval; else status.driving_for += tickInterval; }
 
     bool reachedGoal() const {
-        auto dx = goal.x - position.x;
-        auto dy = goal.y - position.y;
-        return goalValid && std::sqrt(dx * dx + dy * dy) <= config.margins.value.position;
+        if (!goal) return true;
+        auto dx = goal->x - position.x;
+        auto dy = goal->y - position.y;
+        return std::sqrt(dx * dx + dy * dy) <= config.margins.value.position;
     }
 
     void tick() {
@@ -380,6 +382,7 @@ private:
         } else if (reachedGoal()) {
             stDone();
             path.clear();
+            goal.reset();
         } else {
             target = findBestTarget();
             stMoving();

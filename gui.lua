@@ -69,21 +69,24 @@ pipe(client.events, function(ev)
     end
 end)
 
-local view = QML { url = "./qml/Main.qml" }
+local cfgView    = QML { url = "./qml/WheelConfigWindow.qml" }
+local navView    = QML { url = "./qml/NavWindow.qml" }
+local teleopView = QML { url = "./qml/TeleopWindow.qml" }
 
 -- QML "send" events -> websocket client -> main.lua server.
--- Both views send through child model nodes (Main.qml passes
--- radapter.model.node("odo") / node("nav")), so every outgoing message is
--- already wrapped as {odo = ...} or {nav = ...} — forward as-is.
+-- Each view sends through child model branch() nodes, so every outgoing
+-- message is already wrapped as {odo = ...} or {nav = ...} or {teleop = ...}.
 -- Config sends are additionally remembered for replay / persistence.
-pipe(view, function(msg)
+local function outgoing(msg)
     log("From UI: {}", msg)
     if msg.odo and msg.odo.action == "config" then
         remember(msg.odo)
     end
     return msg
-end,
-client)
+end
+pipe(cfgView,    outgoing, client)
+pipe(navView,    client)
+pipe(teleopView, client)
 
 -- Flatten the keyed config map into an array ordered by id (the Repeater needs
 -- a list) and hand it to the model. A saved "all" value replaces the default,
@@ -97,7 +100,7 @@ for key, c in pairs(config_defs) do
     }
 end
 table.sort(params, function(a, b) return a.id < b.id end)
-view { odo = { params = params } }
+cfgView { odo = { params = params } }
 
 -- Route telemetry from the server into the model. Everything arrives already
 -- namespaced by node key ({odo = {chart, odom}}, {nav = {costmap, path, ...}});
@@ -109,5 +112,7 @@ pipe(client, function(msg)
         msg.odo.odomText = fmt("odom  x={:.2f}  y={:.2f}  theta={:.1f} deg  v={:.2f}  omega={:.2f}",
             o.x or 0, o.y or 0, math.deg(o.theta or 0), o.v or 0, o.omega or 0)
     end
-    view(msg)
+    cfgView(msg)
+    navView(msg)
+    teleopView(msg)
 end)

@@ -12,6 +12,8 @@
 -- =============================================================================
 
 local config_defs = require "mods.config_defs"
+local Odometry   = require "mods.odometry"
+local socket     = require "socket"
 
 -- ---- Tunables --------------------------------------------------------------
 
@@ -23,6 +25,10 @@ local WS_PORT       = 6080     -- config-GUI websocket (gui.lua connects here)
 local TRACK_WIDTH   = 0.30     -- distance between left and right wheels, m
 local ODO_PERIOD_MS = 20       -- odometry integration period
 local TELEM_PERIOD_MS = 100    -- chart telemetry stream period
+local MAX_LIN_SPD  = 1       -- m/s at full forward command (v = 1.0)
+local MAX_ROT_SPD  = 2       -- rad/s at full turn command (omega = 1.0)
+local SIM_START_X  = 1.0     -- initial sim robot x, m
+local SIM_START_Y  = 1.0     -- initial sim robot y, m
 
 -- Wheel module node ids (set by each module's DIP switches).  Keys are the
 -- wheel names used throughout the script; values are Cyphal node ids.
@@ -92,20 +98,46 @@ local function set_speed(wheel, value)
     cyphal(msg)
 end
 
---- Command a body twist: forward speed v (m/s) and yaw rate omega (rad/s).
-local function drive(v, omega)
-    local half = TRACK_WIDTH * 0.5
-    local vL, vR = v - omega * half, v + omega * half
-    wheel_tgt.fl, wheel_tgt.rl = vL, vL
-    wheel_tgt.fr, wheel_tgt.rr = vR, vR
-    cyphal {
-        cmd_fl = { value = vL }, cmd_rl = { value = vL },
-        cmd_fr = { value = vR }, cmd_rr = { value = vR },
-    }
-end
+--- Command a body twist.  v (-1..1) and omega (-1..1) are normalised and
+--  clamped, then scaled by MAX_LIN_SPD / MAX_ROT_SPD to physical units.
+--  In sim mode the twist is integrated into a local Odometry instance
+--  (mocked motors); in real mode it is published to Cyphal.
+local sim_last_t = socket.gettime()
+local sim_odo = Odometry.new { trackWidth = TRACK_WIDTH }
+sim_odo:reset { x = SIM_START_X, y = SIM_START_Y, theta = 0 }
 
-local function stop()
-    drive(0.0, 0.0)
+local drive
+if SIM then
+    drive = function(v, omega)
+        v     = math.max(-1, math.min(1, v or 0))
+        omega = math.max(-1, math.min(1, omega or 0))
+        local v_real = v * MAX_LIN_SPD * 2
+        local omega_real = omega * MAX_ROT_SPD * 3
+        local half = TRACK_WIDTH * 0.5
+        local vL = v_real - omega_real * half
+        local vR = v_real + omega_real * half
+        local now = socket.gettime()
+        local dt = now - sim_last_t
+        sim_last_t = now
+        if dt > 0.5 then dt = 0.05 end
+        sim_odo:update(vL, vR, vL, vR, dt)
+    end
+else
+    drive = function(v, omega)
+        v     = math.max(-1, math.min(1, v or 0))
+        omega = math.max(-1, math.min(1, omega or 0))
+        local v_real = v * MAX_LIN_SPD
+        local omega_real = omega * MAX_ROT_SPD
+        local half = TRACK_WIDTH * 0.5
+        local vL = v_real - omega_real * half
+        local vR = v_real + omega_real * half
+        wheel_tgt.fl, wheel_tgt.rl = vL, vL
+        wheel_tgt.fr, wheel_tgt.rr = vR, vR
+        cyphal {
+            cmd_fl = { value = vL }, cmd_rl = { value = vL },
+            cmd_fr = { value = vR }, cmd_rr = { value = vR },
+        }
+    end
 end
 
 --- Open-loop voltage to one wheel ("fl".."rr") or "all", for bring-up / tuning.
@@ -186,10 +218,10 @@ send_initial_config()
 -- Each node is a module returning a single setup function. It gets everything
 -- hardware-tied or externally configurable through its config table, including
 -- `model` — a node() worker exchanging unwrapped messages with the GUI
--- websocket under the node's namespace (mirrors Main.qml's model.node() keys).
+-- websocket under the node's namespace (mirrors Main.qml's model.branch() keys).
 
 local odo = require "nodes.odo" {
-    model = node(ws, "odo"),
+    model = branch(ws, "odo"),
     track_width = TRACK_WIDTH,
     wheels = function()
         local w = {}
@@ -205,11 +237,27 @@ local odo = require "nodes.odo" {
     telem_period_ms = TELEM_PERIOD_MS,
 }
 
+-- SIM-aware pose: returns simulated (mocked-motor) pose or real odometry.
+local function pose()
+    if SIM then
+        return sim_odo:pose()
+    else
+        return odo:pose()
+    end
+end
+
 require "nodes.nav" {
-    model = node(ws, "nav"),
+    model = branch(ws, "nav"),
     sim   = SIM,
-    drive = not SIM and drive or nil,
-    pose  = not SIM and function() return odo:pose() end or nil,
+    drive = drive,
+    pose  = pose,
+}
+
+-- Keyboard teleop from the GUI. Shares drive() with the nav planner — only
+-- one should command the robot at a time, or they will fight.
+require "nodes.teleop" {
+    model = branch(ws, "teleop"),
+    drive = drive,
 }
 
 -- Optional external drive source: a ROS 2 stack publishing cmd_vel (Twist).

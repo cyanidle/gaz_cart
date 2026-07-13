@@ -95,11 +95,11 @@ function GlobalPlanner(cfg) end
 ---Holonomic (omni-wheel) mode — set under `drive.omni_drive` to select it.
 ---@class OmniDriveConfig
 ---@field enable_mid_path_rotation boolean? -- rotate toward path theta while strafing (default true)
----@field max_radians_per_meter number? -- rotation budget per meter driven (default 1.0)
+---@field mid_path_rotation_gain number? -- speed fraction per rad·m of mid-path rotation (default 1.0)
 
 ---Differential (tank) mode — set under `drive.diff_drive` to select it (the default).
 ---@class DiffDriveConfig
----@field heading_kp number? -- turn rate (fraction of full) per rad of heading error (default 1.5)
+---@field heading_kp number? -- speed fraction per radian of heading error (default 1.5)
 ---@field turn_in_place_angle number? -- rad; above this heading error, stop and rotate in place (default 0.8)
 ---@field allow_reverse boolean? -- drive backward toward targets behind the robot (default false)
 
@@ -107,10 +107,10 @@ function GlobalPlanner(cfg) end
 ---Exactly one of `diff_drive` / `omni_drive` selects the kinematics; if neither
 ---is given, `diff_drive` is the default. Setting both raises.
 ---@class DriveConfig
----@field min_speed_coeff number? -- forward-speed floor, fraction of full (default 0.4)
----@field min_rotation_spd number? -- in-place rotation floor, fraction of full (default 0.3)
----@field full_rot_spd_per_radians number? -- in-place rotation gain, 1/rad (default 2.0)
----@field max_speed_for_meters number? -- distance at which forward speed saturates, m (default 0.5)
+---@field min_speed number? -- forward-speed floor, fraction of full (default 0.4)
+---@field min_rotation_speed number? -- in-place rotation floor, fraction of full (default 0.3)
+---@field rotation_gain number? -- in-place rotation speed fraction per radian (default 2.0)
+---@field full_speed_distance number? -- distance at which forward speed saturates at 1.0, m (default 0.5)
 ---@field diff_drive DiffDriveConfig? -- present => differential (tank) mode
 ---@field omni_drive OmniDriveConfig? -- present => holonomic (omni) mode
 
@@ -134,8 +134,8 @@ function GlobalPlanner(cfg) end
 ---rotates into the goal heading, reports status.
 ---Input fields:  `path` (NavPose[]; empty stops the robot), `costmap`
 ---(CostmapServer bytes), `position` (NavPose), `pause` (bool: freeze while true).
----Output (data channel), every tick: `cmd_vel` (NavPose: body-frame linear m/s
----+ angular rad/s), `status` (LocalPlannerStatus — feed back to GlobalPlanner),
+---Output (data channel), every tick: `cmd_vel` (NavPose: body-frame speed
+---+ fractions -1..1), `status` (LocalPlannerStatus — feed back to GlobalPlanner),
 ---`local_target` (NavPose; only while a path is active).
 ---@param cfg LocalPlannerConfig
 ---@return LocalPlanner

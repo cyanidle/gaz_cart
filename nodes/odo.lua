@@ -3,15 +3,15 @@
 --
 --  Integrates diff-drive odometry from the per-wheel speeds, streams chart +
 --  odom telemetry to the WheelConfig tab, and applies its config / speed /
---  direct-voltage commands. Talks to the GUI through cfg.model — a node()
---  worker namespaced under "odo" (the WheelConfig model node key in Main.qml).
+--  direct-voltage commands. Talks to the GUI through cfg.model — a branch()
+--  worker namespaced under "odo" (the WheelConfig model branch key in Main.qml).
 -- =============================================================================
 
 local Odometry = require "mods.odometry"
 local socket   = require "socket"
 
 ---@class OdoConfig
----@field model Pipable GUI model node from node(); sends wrapped, receives unwrapped
+---@field model Pipable GUI model node from branch(); sends wrapped, receives unwrapped
 ---@field track_width number distance between left and right wheels, m
 ---@field wheels fun(): table<string, {tgt: number, act: number}> per-wheel target + actual linear speed, m/s
 ---@field set_speed fun(wheel: string?, value: number) closed-loop speed target, m/s

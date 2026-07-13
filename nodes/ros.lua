@@ -14,10 +14,12 @@
 -- =============================================================================
 
 ---@class RosConfig
----@field drive fun(v: number, omega: number) body twist sink (m/s, rad/s)
+---@field drive fun(v: number, omega: number) body twist sink (normalised -1..1)
 ---@field plugin_dir string directory holding radapter_ros(.so)
 ---@field cmd_vel_topic string? Twist topic to subscribe to (default "/cmd_vel")
 ---@field domain_id integer? ROS_DOMAIN_ID (default: environment / 0)
+---@field max_lin_spd number? m/s at full forward (default 0.5)
+---@field max_rot_spd number? rad/s at full turn (default 1.5)
 
 ---Wire the ROS cmd_vel bridge.
 ---@param cfg RosConfig
@@ -26,6 +28,8 @@ return function(cfg)
     load_plugin(cfg.plugin_dir .. "/radapter_ros")
 
     local topic = cfg.cmd_vel_topic or "/cmd_vel"
+    local max_lin = cfg.max_lin_spd or 0.5
+    local max_rot = cfg.max_rot_spd or 1.5
 
     local node = ROS2 {
         name = "ros_bridge",
@@ -34,12 +38,15 @@ return function(cfg)
             [topic] = {
                 type = "geometry_msgs/msg/Twist",
                 handler = function(twist)
-                    cfg.drive(twist.linear.x, twist.angular.z)
+                    -- Normalise Twist (SI → -1..1) so drive() can clamp + scale
+                    local v     = twist.linear.x  / max_lin
+                    local omega = twist.angular.z / max_rot
+                    cfg.drive(v, omega)
                 end,
             },
         },
     }
 
-    log.info("ros bridge: driving from {} (Twist)", topic)
+    log.info("ros bridge: driving from {} (Twist, max v={} ω={})", topic, max_lin, max_rot)
     return node
 end

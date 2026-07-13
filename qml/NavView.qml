@@ -17,7 +17,7 @@ Item {
     property int gridW: 0
     property int gridH: 0
     property real gridRes: 0.02
-    property var model: null  // radapter.model.node("nav") — set by Main.qml
+    property var model: null  // radapter.model.branch("nav") — set by Main.qml
     property var cells: null     // Uint8Array over the costmap buffer
     property var path: []
     property var scan: []  // lidar hit points [{x,y}...] in world meters
