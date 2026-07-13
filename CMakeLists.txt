@@ -3,3 +3,4 @@ project(gaz_cart CXX C)
 
 add_subdirectory(radapter)
 add_subdirectory(nav)
+add_subdirectory(slam)

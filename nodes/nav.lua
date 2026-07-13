@@ -12,6 +12,7 @@
 -- =============================================================================
 
 load_plugin(SCRIPT_DIR .. "/../build/nav/libgaz_nav")
+load_plugin(SCRIPT_DIR .. "/../build/slam/libgaz_slam")
 
 local UPDATE_MS    = 50
 local ROBOT_RADIUS = 0.1
@@ -77,8 +78,47 @@ return function(cfg)
         lidar = Lidar { name = "lidar", serial = { port = cfg.lidar_port } }
     end
     if lidar then
-        pipe(lidar, costmap)
-        pipe(lidar, function(m) return { scan = m.scan } end, cfg.model)
+        -- SLAM consumes the LaserScan-shaped payload (ranges + geometry), not
+        -- the lidar's odometry-projected obstacle list. Keep the latter as a
+        -- short-lived costmap layer so newly seen/dynamic objects are avoided
+        -- before Karto has enough passes to classify them as map occupancy.
+        pipe(lidar, filter("objects"), costmap)
+    end
+
+    -- Karto scan matching + Ceres pose-graph optimization. Its map uses the
+    -- exact same dimensions/wire format as CostmapServer, so Lua only renames
+    -- `map` to `static_map` at the boundary.
+    local slam
+    if lidar then
+        slam = Slam {
+            name = "slam",
+            map = {
+                width = 101, height = 151, resolution = 0.02,
+                update_interval_ms = 500,
+                min_pass_through = 2,
+                occupancy_threshold = 0.1,
+            },
+            mapper = {
+                minimum_travel_distance = 0.04,
+                minimum_travel_heading = 0.04,
+                scan_buffer_size = 40,
+                do_loop_closing = true,
+            },
+            solver = { threads = 2 },
+        }
+        pipe(lidar, slam)
+        pipe(slam, function(m)
+            if m.map then costmap { static_map = m.map } end
+            if m.position then
+                local p = { position = m.position }
+                gp(p)
+                lp(p)
+                cfg.model(p)
+                lidar(p)
+            end
+            if m.scan then cfg.model { scan = m.scan } end
+            if m.slam then cfg.model { slam = m.slam } end
+        end)
     end
 
     pipe(costmap, gp)
@@ -113,13 +153,21 @@ return function(cfg)
     end)
 
     -- ---- Robot loop ------------------------------------------------------------
-    -- Publish the current pose to both planners and the GUI, at UPDATE_MS.
-    local function publish_pose(pos)
-        local msg = { position = pos }
-        gp(msg)
-        lp(msg)
-        cfg.model(msg)
-        if lidar then lidar(msg) end
+    -- Raw wheel odometry is the SLAM prediction. The simulator also needs that
+    -- raw pose to raycast its ground-truth world. Planners and GUI receive the
+    -- corrected pose from SLAM; without a lidar, they fall back to odometry.
+    local function publish_odometry(pos)
+        if lidar then
+            lidar { position = pos }
+        end
+        if slam then
+            slam { odometry = pos }
+        else
+            local msg = { position = pos }
+            gp(msg)
+            lp(msg)
+            cfg.model(msg)
+        end
     end
 
     -- Always use cfg.drive / cfg.pose — they are SIM-aware (cart.lua wires
@@ -129,6 +177,6 @@ return function(cfg)
     end)
     each(UPDATE_MS, function()
         local x, y, theta = cfg.pose()
-        publish_pose { x = x, y = y, theta = theta }
+        publish_odometry { x = x, y = y, theta = theta }
     end)
 end

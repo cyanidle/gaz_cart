@@ -1,6 +1,8 @@
 // CostmapServer — radapter port of bigbang's costmap_server node.
 //
 // Input message fields (former ROS topics):
+//   static_map — a Grid buffer from SLAM, merged with the configured image
+//                and inflated like other live obstacles
 //   objects — one { x, y, size, ttl, id, source_id } or a list of them
 //             (was `obstacles`, bigbang_eurobot/MapObject; ttl in ms)
 //   point   — { x, y } in meters (was `/clicked_point`): a manual obstacle,
@@ -82,6 +84,7 @@ class CostmapServer final : public Worker {
     nav::Grid staticInflated; // static map, pre-inflated with inflate_static
     nav::Grid clickedPoints;  // manual `point` obstacles
     nav::Grid objectPoints;   // rasterized `objects`
+    nav::Grid slamMap;        // latest occupancy grid from the SLAM worker
     nav::Grid combined;
     nav::Grid output;
 
@@ -112,6 +115,9 @@ public:
 
     void OnMsg(QVariant const& msg) override {
         auto map = msg.toMap();
+        if (auto bytes = map.value("static_map"); !bytes.isNull()) {
+            onStaticMap(bytes.toByteArray());
+        }
         if (auto objs = map.value("objects"); !objs.isNull()) {
             if (objs.metaType().id() == QMetaType::QVariantList) {
                 for (auto const& o : objs.toList()) onObject(ParseAs<MapObject>(o));
@@ -135,6 +141,7 @@ private:
         }
         clickedPoints.reset(config.width, config.height, config.resolution);
         objectPoints.reset(config.width, config.height, config.resolution);
+        slamMap.reset(config.width, config.height, config.resolution);
         combined.reset(config.width, config.height, config.resolution);
         output.reset(config.width, config.height, config.resolution);
 
@@ -185,6 +192,17 @@ private:
         objects[obj.source_id][obj.id] = std::move(obj);
     }
 
+    void onStaticMap(QByteArray const& bytes) {
+        auto incoming = nav::Grid::fromBytes(bytes);
+        if (incoming.width() != output.width() || incoming.height() != output.height() ||
+            std::abs(incoming.resolution() - output.resolution()) > 1e-6) {
+            Raise("CostmapServer: SLAM map is {}x{} @ {}, expected {}x{} @ {}",
+                  incoming.width(), incoming.height(), incoming.resolution(),
+                  output.width(), output.height(), output.resolution());
+        }
+        slamMap = std::move(incoming);
+    }
+
     void onPoint(QVariant const& msg) {
         auto p = ParseAs<nav::Position>(msg);
         auto coord = clickedPoints.metersToCells(p.x, p.y);
@@ -213,7 +231,7 @@ private:
         output = staticInflated;
         updateObjects();
         combined.clear();
-        combined.addCosts(clickedPoints).addCosts(objectPoints);
+        combined.addCosts(slamMap).addCosts(clickedPoints).addCosts(objectPoints);
         if (inflateRadiusCells > 0) {
             combined.inflateInto(output, inflateDPoints, inflateRadiusCells);
         } else {

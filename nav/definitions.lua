@@ -41,7 +41,8 @@
 
 ---Costmap aggregator/publisher.
 ---Input fields:  `objects` (MapObject or MapObject[]), `point` (NavPose: manual
----obstacle, cleared keep_points_ms after the last one).
+---obstacle, cleared keep_points_ms after the last one), `static_map` (a GAMP
+---grid from Slam, merged and inflated with the other layers).
 ---Output (data channel), every update_rate_ms: `costmap` — one immutable bytes
 ---buffer: GridHeader (magic "GAMP", width, height, resolution) + one cost byte
 ---(0..100) per cell, row-major (see nav/nav_common.hpp). Consumers (planners,
@@ -208,7 +209,9 @@ function LocalPlanner(cfg) end
 ---ranges, or { angle, range }[]), `sim_obstacle` (SimObstacle, sim mode),
 ---`clear_sim` (any non-nil: drop sim obstacles).
 ---Output (data channel), per scan: `objects` (MapObject[] for the costmap),
----`scan` ({ pose: NavPose, points: {x,y}[] } world-frame hits, for the GUI).
+---`scan` ({ pose, points, ranges, angle_min, angle_max, angle_increment,
+---range_min, range_max, timestamp }); the range fields intentionally mirror
+---ROS LaserScan and are consumed directly by the Slam worker.
 ---@param cfg LidarConfig
 ---@return Lidar
 function Lidar(cfg) end

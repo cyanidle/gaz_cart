@@ -27,8 +27,8 @@ local ODO_PERIOD_MS = 20       -- odometry integration period
 local TELEM_PERIOD_MS = 100    -- chart telemetry stream period
 local MAX_LIN_SPD  = 1       -- m/s at full forward command (v = 1.0)
 local MAX_ROT_SPD  = 2       -- rad/s at full turn command (omega = 1.0)
-local SIM_START_X  = 1.0     -- initial sim robot x, m
-local SIM_START_Y  = 1.0     -- initial sim robot y, m
+local SIM_START_X  = 0.5     -- initial sim robot x, m
+local SIM_START_Y  = 0.5     -- initial sim robot y, m
 
 -- Wheel module node ids (set by each module's DIP switches).  Keys are the
 -- wheel names used throughout the script; values are Cyphal node ids.

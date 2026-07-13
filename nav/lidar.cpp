@@ -163,6 +163,7 @@ RAD_DESCRIBE(LidarConfig) {
 
 struct ParsedNode {
     double range = 0;   // meters; +inf when out of range (invalid)
+    double angle = 0;   // sensor-relative angle, radians
     V2 position;        // world-frame hit point
 };
 
@@ -382,6 +383,7 @@ private:
     void appendParsed(double relTheta, double range) {
         range += config.range_correction.value;
         ParsedNode node;
+        node.angle = relTheta;
         if (range < config.range_min.value || range >= config.range_max.value) {
             node.range = std::numeric_limits<double>::infinity();
             parsed.push_back(node);
@@ -468,13 +470,28 @@ private:
 
     QVariantMap scanMsg() const {
         QVariantList points;
+        QVariantList ranges;
+        ranges.reserve(int(parsed.size()));
         for (auto const& n : parsed) {
-            if (!std::isfinite(n.range)) continue;
-            points.append(QVariantMap{{"x", n.position.x}, {"y", n.position.y}});
+            ranges.append(std::isfinite(n.range) ? n.range : config.range_max.value);
+            if (std::isfinite(n.range)) {
+                points.append(QVariantMap{{"x", n.position.x}, {"y", n.position.y}});
+            }
         }
+        const double angleMin = parsed.empty() ? 0.0 : parsed.front().angle;
+        const double angleIncrement = parsed.size() > 1
+            ? (parsed.back().angle - angleMin) / double(parsed.size() - 1)
+            : 0.0;
         return {
             {"pose", QVariantMap{{"x", pose.x}, {"y", pose.y}, {"theta", pose.theta.value}}},
             {"points", points},
+            {"ranges", ranges},
+            {"angle_min", angleMin},
+            {"angle_max", parsed.empty() ? angleMin : parsed.back().angle},
+            {"angle_increment", angleIncrement},
+            {"range_min", config.range_min.value},
+            {"range_max", config.range_max.value},
+            {"timestamp", QDateTime::currentMSecsSinceEpoch() / 1000.0},
         };
     }
 

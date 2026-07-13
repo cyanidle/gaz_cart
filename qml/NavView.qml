@@ -25,6 +25,7 @@ Item {
     property var target: null
     property var localTarget: null
     property var status: ({})
+    property var cmdVel: ({ x: 0, y: 0, theta: 0 })
 
     function onMsg(msg) {
         if (msg.costmap !== undefined) {
@@ -59,6 +60,9 @@ Item {
         }
         if (msg.status !== undefined)
             root.status = msg.status
+        if (msg.cmd_vel !== undefined) {
+            root.cmdVel = msg.cmd_vel
+        }
     }
     Component.onCompleted: {
         model.received.connect(onMsg)
@@ -288,6 +292,13 @@ Item {
                     if (s.is_stuck) return "Status: stuck"
                     return "Status: driving"
                 }
+            }
+            Label {
+                objectName: "cmdVelLabel"
+                color: "#333333"
+                text: "cmd_vel  fwd:" + root.cmdVel.x.toFixed(2)
+                      + "  lat:" + root.cmdVel.y.toFixed(2)
+                      + "  rot:" + root.cmdVel.theta.toFixed(2)
             }
             Button {
                 objectName: "cancelBtn"
