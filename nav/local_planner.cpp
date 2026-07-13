@@ -53,12 +53,14 @@ struct PathConfig {
     WithDefault<int> approximation_step_points = 2;
     WithDefault<double> approximation_max_cost = 30.0;
     WithDefault<int> fallback_min_points_count = 3;
+    WithDefault<double> unknown_inflation_radius = 0.20;
 };
 RAD_DESCRIBE(PathConfig) {
     RAD_MEMBER(half_slow_per_cost_of);
     RAD_MEMBER(approximation_step_points);
     RAD_MEMBER(approximation_max_cost);
     RAD_MEMBER(fallback_min_points_count);
+    RAD_MEMBER(unknown_inflation_radius);
 }
 
 // Holonomic (omni-wheel) mode: strafes straight at the target, optionally
@@ -182,6 +184,9 @@ private:
         if (config.tick_rate.value <= 0) {
             Raise("LocalPlanner: tick_rate must be > 0");
         }
+        if (config.path.value.unknown_inflation_radius.value < 0) {
+            Raise("LocalPlanner: path.unknown_inflation_radius must be >= 0");
+        }
         auto& d = config.drive.value;
         if (d.diff_drive && d.omni_drive) {
             Raise("LocalPlanner: set only one of drive.diff_drive / drive.omni_drive");
@@ -253,7 +258,25 @@ private:
     }
 
     int atSafe(nav::Coord c) const {
-        return costmap.valid(c) ? costmap.at(c) : nav::Grid::MaxCost;
+        if (!costmap.valid(c) || costmap.isUnknown(c)) return nav::Grid::MaxCost;
+
+        int result = costmap.at(c);
+        const auto radiusCells =
+            config.path.value.unknown_inflation_radius.value / costmap.resolution();
+        if (radiusCells <= 0) return result;
+
+        const int radius = int(std::ceil(radiusCells));
+        for (int dx = -radius; dx <= radius; ++dx) {
+            for (int dy = -radius; dy <= radius; ++dy) {
+                const auto dist = std::sqrt(double(dx * dx + dy * dy));
+                if (dist > radiusCells) continue;
+                const nav::Coord nearby{c.x + dx, c.y + dy};
+                if (!costmap.valid(nearby) || !costmap.isUnknown(nearby)) continue;
+                const auto danger = int((radiusCells - dist) / radiusCells * nav::Grid::MaxCost);
+                result = std::max(result, danger);
+            }
+        }
+        return result;
     }
 
     bool reachedTarget() const {

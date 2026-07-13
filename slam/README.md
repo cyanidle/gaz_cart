@@ -46,6 +46,11 @@ moves as new space is observed. Its 24-byte header contains `magic`, `width`,
 `height`, `resolution`, `origin_x`, and `origin_y`, followed by row-major cell
 bytes. Free cells are `0`, occupied cells are `100`, and unobserved cells are
 `255` (unknown). `CostmapServer` adopts this geometry and preserves unknown
-space, so both planners treat it as impassable until SLAM observes it as free.
-Legacy 16-byte `GAMP` maps without an origin remain readable with an implicit
-origin of `(0, 0)`.
+space. The global planner may route through unknown cells for exploration; the
+local planner treats unknown as maximum danger and adds a safety gradient around
+its boundary, advancing as lidar reveals free cells.
+
+The navigation UI can freeze discovery, preserving the currently accepted map
+while SLAM continues producing corrected poses. Maps transfer between the cart
+and GUI as PNG files. Transparent pixels represent unknown space, black is
+occupied, white is free, and PNG text metadata preserves resolution and origin.

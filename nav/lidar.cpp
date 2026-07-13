@@ -371,7 +371,7 @@ private:
     double raycast(double ang) const {
         V2 o = lidarPos();
         V2 d{std::cos(ang), std::sin(ang)};
-        double best = config.range_max.value;
+        double best = std::numeric_limits<double>::infinity();
         for (auto const& ob : simObstacles) {
             V2 oc = V2{ob.x.value, ob.y.value} - o;
             double proj = oc.x * d.x + oc.y * d.y;

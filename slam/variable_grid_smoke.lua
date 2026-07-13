@@ -39,15 +39,14 @@ end)
 pipe(planner, function(msg)
     if not msg.path or #msg.path == 0 then return end
     local last = msg.path[#msg.path]
-    local inside_known = true
+    local reaches_outside = false
     for _, point in ipairs(msg.path) do
-        inside_known = inside_known and point.x >= -0.5 and point.x <= 0.5
-            and point.y >= -0.5 and point.y <= 0.5
+        reaches_outside = reaches_outside or point.x > 1.5
     end
     if geometry_ok and unknown_ok
-            and inside_known
-            and math.abs(last.x - 0.5) < 1e-6 and math.abs(last.y - 0.5) < 1e-6 then
-        log.info("variable-grid planner smoke OK ({} path points)", #msg.path)
+            and reaches_outside
+            and math.abs(last.x - 2.0) < 1e-6 and math.abs(last.y - 0.5) < 1e-6 then
+        log.info("variable-grid outside-target smoke OK ({} path points)", #msg.path)
         shutdown()
     end
 end)
@@ -56,7 +55,9 @@ costmap { static_map = grid }
 after(50, function()
     planner {
         position = { x = -0.5, y = -0.5, theta = 0 },
-        target = { x = 0.5, y = 0.5, theta = 0 },
+        -- The rendered grid ends at x=1.5. Space beyond it must be planned as
+        -- unexplored instead of being rejected as outside the A* domain.
+        target = { x = 2.0, y = 0.5, theta = 0 },
     }
 end)
 

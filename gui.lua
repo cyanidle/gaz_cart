@@ -85,8 +85,45 @@ local function outgoing(msg)
     return msg
 end
 pipe(cfgView,    outgoing, client)
-pipe(navView,    client)
 pipe(teleopView, client)
+
+-- Map files live on the GUI machine, while mapping runs on the cart. Keep file
+-- I/O local and transfer the PNG payload as MsgPack binary over the websocket.
+local pending_map_dump
+local function local_file_path(url)
+    local path = tostring(url):gsub("^file://", "")
+    return (path:gsub("%%(%x%x)", function(hex)
+        return string.char(tonumber(hex, 16))
+    end))
+end
+local function nav_status(text)
+    navView { nav = { map_io_status = text } }
+end
+local function nav_outgoing(msg)
+    local nav = msg.nav
+    if not nav then return msg end
+    if nav.load_map_file then
+        local path = local_file_path(nav.load_map_file)
+        local file, err = io.open(path, "rb")
+        if not file then
+            nav_status("Load failed: " .. tostring(err))
+            return nil
+        end
+        local payload = bytes(file:read("a"))
+        file:close()
+        nav_status("Uploading " .. path .. " …")
+        client { nav = { load_map = payload } }
+        return nil
+    end
+    if nav.dump_map_file then
+        pending_map_dump = local_file_path(nav.dump_map_file)
+        nav_status("Requesting map …")
+        client { nav = { dump_map = true } }
+        return nil
+    end
+    return msg
+end
+pipe(navView, nav_outgoing, client)
 
 -- Flatten the keyed config map into an array ordered by id (the Repeater needs
 -- a list) and hand it to the model. A saved "all" value replaces the default,
@@ -111,6 +148,20 @@ pipe(client, function(msg)
         local o = msg.odo.odom
         msg.odo.odomText = fmt("odom  x={:.2f}  y={:.2f}  theta={:.1f} deg  v={:.2f}  omega={:.2f}",
             o.x or 0, o.y or 0, math.deg(o.theta or 0), o.v or 0, o.omega or 0)
+    end
+    if msg.nav and msg.nav.map_image then
+        if pending_map_dump then
+            local file, err = io.open(pending_map_dump, "wb")
+            if file then
+                file:write(msg.nav.map_image:str())
+                file:close()
+                nav_status("Map saved to " .. pending_map_dump)
+            else
+                nav_status("Save failed: " .. tostring(err))
+            end
+            pending_map_dump = nil
+        end
+        msg.nav.map_image = nil
     end
     cfgView(msg)
     navView(msg)

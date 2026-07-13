@@ -38,6 +38,8 @@
 
 ---@class CostmapServer : Worker
 ---@field Reload fun(self: CostmapServer, cfg: CostmapServerConfig): boolean -- re-apply a full config table (defaults re-applied)
+---@field DumpMap fun(self: CostmapServer): bytes -- PNG of current SLAM/loaded map, including geometry metadata
+---@field LoadMap fun(self: CostmapServer, image: bytes): boolean -- transparent pixels are unknown
 
 ---Costmap aggregator/publisher.
 ---Input fields:  `objects` (MapObject or MapObject[]), `point` (NavPose: manual
@@ -47,9 +49,10 @@
 ---Output (data channel), every update_rate_ms: `costmap` — one immutable bytes
 ---buffer: GridHeader (magic "GAMP", width, height, resolution, origin_x,
 ---origin_y) + one row-major byte per cell: 0..100 cost or 255 unknown (see
----nav/nav_common.hpp). Unknown cells are impassable. Legacy headers without an
----origin are accepted as origin (0, 0). Consumers (planners, QML DataView)
----reinterpret the buffer in place — no repacking.
+---nav/nav_common.hpp). Consumers (planners, QML DataView) reinterpret the
+---buffer in place — no repacking. DumpMap/LoadMap use PNG: transparent pixels
+---are unknown, black is occupied, white is free, and PNG text fields preserve
+---resolution and origin.
 ---@param cfg CostmapServerConfig
 ---@return CostmapServer
 function CostmapServer(cfg) end
@@ -60,7 +63,8 @@ function CostmapServer(cfg) end
 ---@field costmap_to_node_cost_coeff number? -- weight of cell cost in node cost (default 5.0)
 ---@field cell_cost number? -- base cost per step (default 10.0)
 ---@field diagonal_coeff number? -- diagonal step multiplier (default 1.25)
----@field max_cost integer? -- cells above this are impassable (default 35)
+---@field max_cost integer? -- known cells above this are impassable (default 35)
+---@field unknown_cost integer? -- A* cost for traversable unknown cells, 0..100 (default 30)
 
 ---@class GlobalPlannerConfig : WorkerConfig
 ---@field a_star AStarConfig?
@@ -68,6 +72,7 @@ function CostmapServer(cfg) end
 ---@field reserve_in_path_size integer? -- path list reserve (default 60)
 ---@field update_rate_ms integer? -- replan period (default 50)
 ---@field max_points integer? -- A* node budget before a plan fails (default 2000)
+---@field outside_map_margin number? -- temporary unknown padding for an out-of-grid target, meters (default 0.25)
 ---@field consider_reached_after number? -- s of local-planner idle to finish a target (default 1.5)
 ---@field min_time_for_target number? -- s before idle can finish a fresh target (default 0.5)
 
@@ -75,6 +80,8 @@ function CostmapServer(cfg) end
 ---@field Reload fun(self: GlobalPlanner, cfg: GlobalPlannerConfig): boolean -- re-apply a full config table (defaults re-applied)
 
 ---A* planner on the costmap, replanning on a timer while a target is active.
+---Unknown cells are traversable using `a_star.unknown_cost`; known obstacle
+---costs above `max_cost` remain impassable.
 ---Input fields:  `costmap` (CostmapServer bytes), `position` (NavPose),
 ---`target` (NavPose command), `cancel` (any non-nil), `status` (LocalPlanner's,
 ---finishes the target once reached && rotated and idle long enough).
@@ -95,6 +102,7 @@ function GlobalPlanner(cfg) end
 ---@field approximation_step_points integer? -- lookahead scan stride, points (default 2)
 ---@field approximation_max_cost number? -- max cell cost on the shortcut to a candidate (default 30.0)
 ---@field fallback_min_points_count integer? -- min points to keep when no candidate passes (default 3)
+---@field unknown_inflation_radius number? -- local danger radius around unknown space, m (default 0.20)
 
 ---Holonomic (omni-wheel) mode — set under `drive.omni_drive` to select it.
 ---@class OmniDriveConfig
@@ -135,7 +143,8 @@ function GlobalPlanner(cfg) end
 ---@field Reload fun(self: LocalPlanner, cfg: LocalPlannerConfig): boolean -- re-apply a full config table (defaults re-applied)
 
 ---Path follower: drives toward the furthest cheaply-reachable path point,
----rotates into the goal heading, reports status.
+---rotates into the goal heading, reports status. Unknown cells count as maximum
+---danger and are locally inflated by `path.unknown_inflation_radius`.
 ---Input fields:  `path` (NavPose[]; empty stops the robot), `costmap`
 ---(CostmapServer bytes), `position` (NavPose), `pause` (bool: freeze while true).
 ---Output (data channel), every tick: `cmd_vel` (NavPose: body-frame speed

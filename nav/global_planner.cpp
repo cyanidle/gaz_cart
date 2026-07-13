@@ -23,7 +23,8 @@
 // re-applies a full config table.
 
 #include <QTimer>
-#include <unordered_set>
+#include <algorithm>
+#include <boost/unordered/unordered_flat_set.hpp>
 #include <vector>
 
 #include "radapter/radapter.hpp"
@@ -39,12 +40,14 @@ struct AStarConfig {
     WithDefault<double> cell_cost = 10.0;
     WithDefault<double> diagonal_coeff = 1.25;
     WithDefault<int> max_cost = 35;
+    WithDefault<int> unknown_cost = 30;
 };
 RAD_DESCRIBE(AStarConfig) {
     RAD_MEMBER(costmap_to_node_cost_coeff);
     RAD_MEMBER(cell_cost);
     RAD_MEMBER(diagonal_coeff);
     RAD_MEMBER(max_cost);
+    RAD_MEMBER(unknown_cost);
 }
 
 struct GlobalPlannerConfig : WorkerConfig {
@@ -53,6 +56,7 @@ struct GlobalPlannerConfig : WorkerConfig {
     WithDefault<int> reserve_in_path_size = 60;
     WithDefault<int> update_rate_ms = 50;
     WithDefault<int> max_points = 2000;
+    WithDefault<double> outside_map_margin = 0.25; // unknown padding around out-of-grid plans
     WithDefault<double> consider_reached_after = 1.5; // s of local-planner idle
     WithDefault<double> min_time_for_target = 0.5;    // s before idle can finish a target
 };
@@ -63,6 +67,7 @@ RAD_DESCRIBE(GlobalPlannerConfig) {
     RAD_MEMBER(reserve_in_path_size);
     RAD_MEMBER(update_rate_ms);
     RAD_MEMBER(max_points);
+    RAD_MEMBER(outside_map_margin);
     RAD_MEMBER(consider_reached_after);
     RAD_MEMBER(min_time_for_target);
 }
@@ -88,7 +93,8 @@ struct PlannerNode {
 class GlobalPlanner final : public Worker {
     GlobalPlannerConfig config;
 
-    nav::Grid costmap;
+    nav::Grid receivedCostmap;
+    nav::Grid costmap; // received grid, or an unknown-padded private planning copy
     nav::Position position;
     nav::Position targetPos;
     PlannerNode target;
@@ -96,8 +102,8 @@ class GlobalPlanner final : public Worker {
     bool reached = false;
 
     std::vector<PlannerNode> graph;
-    std::unordered_set<quint32> open;
-    std::unordered_set<nav::Coord, nav::CoordHash> covered;
+    boost::unordered_flat_set<quint32> open;
+    boost::unordered_flat_set<nav::Coord, nav::CoordHash> covered;
     int currentCount = 0;
     double timeSinceNewTarget = 0;
 
@@ -120,7 +126,7 @@ public:
     void OnMsg(QVariant const& msg) override {
         auto map = msg.toMap();
         if (auto cm = map.value("costmap"); !cm.isNull()) {
-            costmap = nav::Grid::fromBytes(cm.toByteArray());
+            receivedCostmap = nav::Grid::fromBytes(cm.toByteArray());
         }
         if (auto pos = map.value("position"); !pos.isNull()) {
             position = ParseAs<nav::Position>(pos);
@@ -139,6 +145,12 @@ public:
 private:
     void apply(GlobalPlannerConfig conf) {
         config = std::move(conf);
+        if (aStar().unknown_cost.value < 0 || aStar().unknown_cost.value > nav::Grid::MaxCost) {
+            Raise("GlobalPlanner: a_star.unknown_cost must be in 0..{}", nav::Grid::MaxCost);
+        }
+        if (config.outside_map_margin.value < 0) {
+            Raise("GlobalPlanner: outside_map_margin must be >= 0");
+        }
         graph.reserve(size_t(config.nodes_batch_size.value));
         open.reserve(size_t(config.nodes_batch_size.value));
         covered.reserve(size_t(config.nodes_batch_size.value));
@@ -201,7 +213,10 @@ private:
         auto stepCost = diagonalStep
             ? aStar().cell_cost * aStar().diagonal_coeff
             : aStar().cell_cost.value;
-        auto mapCost = costmap.at(coord) * aStar().costmap_to_node_cost_coeff;
+        const auto rawCost = costmap.at(coord);
+        const auto planningCost = rawCost == nav::Grid::UnknownCost
+            ? aStar().unknown_cost.value : rawCost;
+        auto mapCost = planningCost * aStar().costmap_to_node_cost_coeff;
         return float(dist * aStar().cell_cost + stepCost + mapCost);
     }
 
@@ -213,6 +228,9 @@ private:
             for (int dy = -1; dy < 2; ++dy) {
                 if (!dx && !dy) continue;
                 nav::Coord current{x + dx, y + dy};
+                if (!costmap.valid(current)) continue;
+                const auto cellCost = costmap.at(current);
+                if (cellCost != nav::Grid::UnknownCost && cellCost > aStar().max_cost) continue;
                 if (current == target.coord) {
                     reached = true;
                     open.insert(append(PlannerNode{target.coord, target.theta, parentIndex, 0}));
@@ -220,18 +238,51 @@ private:
                     return;
                 }
                 if (covered.find(current) != covered.end()) continue;
-                if (!costmap.valid(current)) continue;
-                if (costmap.at(current) > aStar().max_cost) continue;
                 covered.emplace(current);
                 open.insert(append(PlannerNode{current, 0, parentIndex, cost(current, dx && dy)}));
             }
         }
     }
 
+    void preparePlanningCostmap() {
+        const auto start = receivedCostmap.metersToCells(position.x, position.y);
+        const auto goal = receivedCostmap.metersToCells(targetPos.x, targetPos.y);
+        if (receivedCostmap.valid(start) && receivedCostmap.valid(goal)) {
+            costmap = receivedCostmap;
+            return;
+        }
+
+        // SLAM's rectangle only bounds what has been observed so far. Treat
+        // space beyond it as unexplored by padding a private A* grid. The
+        // received costmap remains unchanged, so LocalPlanner can continue to
+        // treat unknown and out-of-grid space as maximum danger.
+        const auto margin = int(std::ceil(
+            config.outside_map_margin.value / receivedCostmap.resolution()));
+        const auto minX = std::min({0, start.x, goal.x}) - margin;
+        const auto minY = std::min({0, start.y, goal.y}) - margin;
+        const auto maxX = std::max({receivedCostmap.width() - 1, start.x, goal.x}) + margin;
+        const auto maxY = std::max({receivedCostmap.height() - 1, start.y, goal.y}) + margin;
+
+        costmap.reset(maxX - minX + 1, maxY - minY + 1,
+                      receivedCostmap.resolution(),
+                      receivedCostmap.originX() + minX * receivedCostmap.resolution(),
+                      receivedCostmap.originY() + minY * receivedCostmap.resolution(),
+                      nav::Grid::UnknownCost);
+        const auto dstX = -minX;
+        const auto dstY = -minY;
+        for (int y = 0; y < receivedCostmap.height(); ++y) {
+            std::copy_n(receivedCostmap.cells() + y * receivedCostmap.width(),
+                        receivedCostmap.width(),
+                        costmap.cells() + (y + dstY) * costmap.width() + dstX);
+        }
+    }
+
     void update() {
         timeSinceNewTarget += config.update_rate_ms.value / 1000.0;
         if (canceled) return;
-        if (costmap.isEmpty()) return; // no costmap received yet
+        if (receivedCostmap.isEmpty()) return; // no costmap received yet
+
+        preparePlanningCostmap();
 
         // resolve the target against the current costmap on every replan
         target.coord = costmap.metersToCells(targetPos.x, targetPos.y);

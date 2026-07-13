@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 
 // Costmap visualization + manual positioning + click-to-plan.
@@ -28,6 +29,8 @@ Item {
     property var localTarget: null
     property var status: ({})
     property var cmdVel: ({ x: 0, y: 0, theta: 0 })
+    property bool discoveryEnabled: true
+    property string mapIoStatus: ""
 
     function onMsg(msg) {
         if (msg.costmap !== undefined) {
@@ -40,14 +43,13 @@ Item {
             root.gridH = dv.getInt32(8, true)
             root.gridRes = dv.getFloat32(12, true)
             var cellCount = root.gridW * root.gridH
-            var headerSize = dv.byteLength === 24 + cellCount ? 24 : 16
-            if (dv.byteLength !== headerSize + cellCount) {
+            if (dv.byteLength !== 24 + cellCount) {
                 console.warn("costmap: invalid buffer size")
                 return
             }
-            root.gridOriginX = headerSize === 24 ? dv.getFloat32(16, true) : 0
-            root.gridOriginY = headerSize === 24 ? dv.getFloat32(20, true) : 0
-            root.cells = new Uint8Array(msg.costmap, headerSize, cellCount)
+            root.gridOriginX = dv.getFloat32(16, true)
+            root.gridOriginY = dv.getFloat32(20, true)
+            root.cells = new Uint8Array(msg.costmap, 24, cellCount)
             canvas.requestPaint()
         }
         if (msg.path !== undefined) {
@@ -73,6 +75,10 @@ Item {
         if (msg.cmd_vel !== undefined) {
             root.cmdVel = msg.cmd_vel
         }
+        if (msg.discovery_enabled !== undefined)
+            root.discoveryEnabled = msg.discovery_enabled
+        if (msg.map_io_status !== undefined)
+            root.mapIoStatus = msg.map_io_status
     }
     Component.onCompleted: {
         model.received.connect(onMsg)
@@ -91,22 +97,35 @@ Item {
             anchors.right: sidebar.left
             anchors.rightMargin: 8
 
-            property real cellPx: root.gridW > 0
+            property real zoom: 1.0
+            property real panX: 0
+            property real panY: 0
+            property real baseCellPx: root.gridW > 0
                 ? Math.min(width / root.gridW, height / root.gridH) : 1
+            property real cellPx: baseCellPx * zoom
+            property real mapOffsetX: (width - root.gridW * cellPx) / 2 + panX
+            property real mapOffsetY: (height - root.gridH * cellPx) / 2 + panY
+
+            function resetView() {
+                zoom = 1
+                panX = 0
+                panY = 0
+                requestPaint()
+            }
 
             function toScreenX(mx) {
-                return (mx - root.gridOriginX) / root.gridRes * cellPx
+                return mapOffsetX + (mx - root.gridOriginX) / root.gridRes * cellPx
             }
             function toScreenY(my) {
-                return root.gridH * cellPx
+                return mapOffsetY + root.gridH * cellPx
                     - (my - root.gridOriginY) / root.gridRes * cellPx
             }
             function toMetersX(sx) {
-                return root.gridOriginX + sx / cellPx * root.gridRes
+                return root.gridOriginX + (sx - mapOffsetX) / cellPx * root.gridRes
             }
             function toMetersY(sy) {
                 return root.gridOriginY
-                    + (root.gridH * cellPx - sy) / cellPx * root.gridRes
+                    + (mapOffsetY + root.gridH * cellPx - sy) / cellPx * root.gridRes
             }
 
             // heading tick/arrow at screen point (sx, sy); theta is world-frame
@@ -139,11 +158,11 @@ Item {
                 var w = root.gridW, h = root.gridH, px = cellPx
 
                 ctx.fillStyle = '#404449'
-                ctx.fillRect(0, 0, w * px, h * px)
+                ctx.fillRect(mapOffsetX, mapOffsetY, w * px, h * px)
 
                 // cells: cost 0 transparent, 1..99 yellow->red, 100 solid red
                 for (var y = 0; y < h; ++y) {
-                    var sy = (h - 1 - y) * px
+                    var sy = mapOffsetY + (h - 1 - y) * px
                     var row = y * w
                     for (var x = 0; x < w; ++x) {
                         var cost = root.cells[row + x]
@@ -151,7 +170,7 @@ Item {
                         ctx.fillStyle = cost === 255 ? "#25282b"
                             : cost >= 100 ? "#e06c75"
                             : Qt.rgba(0.9, 0.75 - 0.5 * cost / 100, 0.2, 0.25 + 0.6 * cost / 100)
-                        ctx.fillRect(x * px, sy, px + 0.5, px + 0.5)
+                        ctx.fillRect(mapOffsetX + x * px, sy, px + 0.5, px + 0.5)
                     }
                 }
 
@@ -247,7 +266,9 @@ Item {
             MouseArea {
                 id: mouseArea
                 anchors.fill: parent
-                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+                cursorShape: (pressedButtons & Qt.MiddleButton) !== 0
+                    ? Qt.ClosedHandCursor : Qt.ArrowCursor
 
                 // Shift+click adjusts the robot pose. A plain click sets a
                 // target; drag past the threshold to command its final heading.
@@ -260,18 +281,38 @@ Item {
                         x: mouse.x, y: mouse.y, button: mouse.button,
                         modifiers: mouse.modifiers,
                     }
-                    dragPos = null
+                    dragPos = mouse.button === Qt.MiddleButton
+                        ? { x: mouse.x, y: mouse.y } : null
                 }
                 onPositionChanged: function (mouse) {
                     if (!pressPos) return
+                    if (pressPos.button === Qt.MiddleButton) {
+                        canvas.panX += mouse.x - dragPos.x
+                        canvas.panY += mouse.y - dragPos.y
+                        dragPos = { x: mouse.x, y: mouse.y }
+                        canvas.requestPaint()
+                        return
+                    }
                     dragPos = { x: mouse.x, y: mouse.y }
                     canvas.requestPaint()
+                }
+                onWheel: function (wheel) {
+                    if (root.gridW <= 0) return
+                    var worldX = canvas.toMetersX(wheel.x)
+                    var worldY = canvas.toMetersY(wheel.y)
+                    var factor = Math.pow(1.0015, wheel.angleDelta.y)
+                    canvas.zoom = Math.max(0.2, Math.min(20, canvas.zoom * factor))
+                    canvas.panX += wheel.x - canvas.toScreenX(worldX)
+                    canvas.panY += wheel.y - canvas.toScreenY(worldY)
+                    canvas.requestPaint()
+                    wheel.accepted = true
                 }
                 onReleased: function (mouse) {
                     var press = pressPos
                     pressPos = null
                     dragPos = null
                     if (!press || root.gridW <= 0) return
+                    if (press.button === Qt.MiddleButton) return
                     var mx = canvas.toMetersX(press.x)
                     var my = canvas.toMetersY(press.y)
                     if (press.button === Qt.RightButton) {
@@ -294,6 +335,11 @@ Item {
                             model.send({ target: root.target })
                         }
                     }
+                    canvas.requestPaint()
+                }
+                onCanceled: {
+                    pressPos = null
+                    dragPos = null
                     canvas.requestPaint()
                 }
             }
@@ -344,16 +390,68 @@ Item {
                     canvas.requestPaint()
                 }
             }
+            CheckBox {
+                objectName: "discoveryCheck"
+                text: "Map discovery"
+                checked: root.discoveryEnabled
+                onClicked: model.send({ discovery_enabled: checked })
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Button {
+                    objectName: "loadMapBtn"
+                    text: "Load map"
+                    Layout.fillWidth: true
+                    onClicked: loadMapDialog.open()
+                }
+                Button {
+                    objectName: "dumpMapBtn"
+                    text: "Dump map"
+                    Layout.fillWidth: true
+                    onClicked: dumpMapDialog.open()
+                }
+            }
+            Button {
+                objectName: "resetViewBtn"
+                text: "Reset view"
+                Layout.fillWidth: true
+                onClicked: canvas.resetView()
+            }
+            Label {
+                visible: root.mapIoStatus.length > 0
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: "#555555"
+                text: root.mapIoStatus
+            }
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: "#555555"
                 text: "LMB click — set target\nLMB drag — set target + heading\n" +
                       "Shift+LMB — reposition robot\n" +
+                      "Wheel — zoom\nMMB drag — pan\n" +
                       "RMB — drop an obstacle\n(sim: lidar discovers it; else a\ntemporary costmap point)\n\n" +
                       "Blue dots: lidar scan hits\nTicks: path point theta\nOrange arrow: local planner's pick"
             }
             Item { Layout.fillHeight: true }
         }
+    }
+
+    FileDialog {
+        id: loadMapDialog
+        title: "Load occupancy map"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["PNG map images (*.png)", "Images (*.png *.jpg *.jpeg *.bmp)"]
+        onAccepted: model.send({ load_map_file: selectedFile.toString() })
+    }
+
+    FileDialog {
+        id: dumpMapDialog
+        title: "Dump occupancy map"
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "png"
+        nameFilters: ["PNG map images (*.png)"]
+        onAccepted: model.send({ dump_map_file: selectedFile.toString() })
     }
 }

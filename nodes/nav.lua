@@ -40,6 +40,7 @@ local SIM_OBSTACLE_RADIUS = 0.1 -- radius for obstacles dropped via right-click
 ---@param cfg NavConfig
 return function(cfg)
     local sim = cfg.sim
+    local mapDiscovery = true
 
     assert(cfg.drive, "cfg.drive required")
     assert(cfg.pose, "cfg.pose required")
@@ -115,9 +116,13 @@ return function(cfg)
         pipe(lidar, filter("objects"), costmap)
     end
 
-    -- Karto scan matching + Ceres pose-graph optimization. CostmapServer adopts
-    -- the map's changing dimensions and world origin, so Lua only renames `map`
-    -- to `static_map` at the boundary.
+    -- Karto scan matching + Ceres pose-graph optimization. Every scan also
+    -- carries the current wheel pose as Karto's odometric prior. In simulation
+    -- both odometry and raycasts are exact; Karto explicitly recommends turning
+    -- scan matching off in that case because its small corrections only add
+    -- pose jitter. Real hardware keeps scan matching and loop closure enabled.
+    -- CostmapServer adopts the map's changing dimensions and world origin, so
+    -- Lua only renames `map` to `static_map` at the boundary.
     local slam
     if lidar then
         slam = Slam {
@@ -139,7 +144,7 @@ return function(cfg)
         }
         pipe(lidar, slam)
         pipe(slam, function(m)
-            if m.map then costmap { static_map = m.map } end
+            if m.map and mapDiscovery then costmap { static_map = m.map } end
             if m.position then
                 local p = { position = m.position }
                 gp(p)
@@ -157,7 +162,10 @@ return function(cfg)
     pipe(lp, gp) -- status feedback (finishes the target once idle)
 
     -- ---- GUI -------------------------------------------------------------------
-    pipe(costmap, cfg.model) -- costmap bytes
+    pipe(costmap, function(m)
+        m.discovery_enabled = mapDiscovery
+        return m
+    end, cfg.model) -- costmap bytes + current discovery state
     pipe(gp, cfg.model)      -- path
     pipe(lp, cfg.model)      -- status
 
@@ -196,6 +204,29 @@ return function(cfg)
         if msg.cancel then
             lp { cancel = true }
             gp { cancel = true }
+        end
+        if msg.discovery_enabled ~= nil then
+            mapDiscovery = not not msg.discovery_enabled
+        end
+        if msg.dump_map then
+            local ok, image = pcall(function() return costmap:DumpMap() end)
+            if ok then
+                cfg.model { map_image = image }
+            else
+                cfg.model { map_io_status = "Dump failed: " .. tostring(image) }
+            end
+        end
+        if msg.load_map then
+            local ok, err = pcall(function() costmap:LoadMap(msg.load_map) end)
+            if ok then
+                mapDiscovery = false
+                cfg.model {
+                    discovery_enabled = false,
+                    map_io_status = "Map loaded; discovery disabled",
+                }
+            else
+                cfg.model { map_io_status = "Load failed: " .. tostring(err) }
+            end
         end
         if msg.reposition then
             local desired = msg.reposition

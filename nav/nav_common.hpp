@@ -5,10 +5,9 @@
 //
 // A Grid's entire state is ONE raw QByteArray: a 24-byte GridHeader
 // (magic, width, height, resolution, world origin x/y) followed by one byte per
-// cell, row-major. Costs are 0..100; 255 means unknown. Legacy 16-byte GAMP
-// buffers are accepted with an implicit (0, 0) origin. The buffer itself is the
-// wire format: emitting a costmap message is `grid.bytes()` — a COW share, no
-// copy — and it crosses into Lua as an immutable `bytes` userdata.
+// cell, row-major. Costs are 0..100; 255 means unknown. The buffer itself is
+// the wire format: emitting a costmap message is `grid.bytes()` — a COW share,
+// no copy — and it crosses into Lua as an immutable `bytes` userdata.
 
 #include <QByteArray>
 #include <QVariantMap>
@@ -65,14 +64,6 @@ struct GridHeader {
 };
 static_assert(sizeof(GridHeader) == 24, "wire format");
 
-struct LegacyGridHeader {
-    qint32 magic;
-    qint32 width;
-    qint32 height;
-    float resolution;
-};
-static_assert(sizeof(LegacyGridHeader) == 16, "legacy wire format");
-
 class Grid {
     QByteArray buf; // GridHeader + width*height cost bytes
 
@@ -80,7 +71,6 @@ public:
     static constexpr int MaxCost = 100;
     static constexpr int UnknownCost = 255;
     static constexpr int HeaderSize = int(sizeof(GridHeader));
-    static constexpr int LegacyHeaderSize = int(sizeof(LegacyGridHeader));
 
     Grid() = default;
 
@@ -109,10 +99,10 @@ public:
 
     // Adopts a received buffer (COW share). Raises on malformed input.
     static Grid fromBytes(QByteArray bytes) {
-        if (bytes.size() < LegacyHeaderSize) {
+        if (bytes.size() < HeaderSize) {
             radapter::Raise("costmap: buffer too small ({} bytes)", bytes.size());
         }
-        LegacyGridHeader h;
+        GridHeader h;
         std::memcpy(&h, bytes.constData(), sizeof(h));
         if (h.magic != GridHeader::Magic) {
             radapter::Raise("costmap: bad magic {:#x}", quint32(h.magic));
@@ -125,18 +115,13 @@ public:
             radapter::Raise("costmap: grid {}x{} is too large", h.width, h.height);
         }
         const auto cells = qsizetype(h.width) * h.height;
-        const auto legacySize = LegacyHeaderSize + cells;
-        const auto currentSize = HeaderSize + cells;
-        if (bytes.size() != legacySize && bytes.size() != currentSize) {
-            radapter::Raise("costmap: expected {} or {} bytes for {}x{}, got {}",
-                            legacySize, currentSize, h.width, h.height, bytes.size());
+        const auto expectedSize = HeaderSize + cells;
+        if (bytes.size() != expectedSize) {
+            radapter::Raise("costmap: expected {} bytes for {}x{}, got {}",
+                            expectedSize, h.width, h.height, bytes.size());
         }
-        if (bytes.size() == currentSize) {
-            GridHeader current;
-            std::memcpy(&current, bytes.constData(), sizeof(current));
-            if (!std::isfinite(current.originX) || !std::isfinite(current.originY)) {
-                radapter::Raise("costmap: invalid origin {},{}", current.originX, current.originY);
-            }
+        if (!std::isfinite(h.originX) || !std::isfinite(h.originY)) {
+            radapter::Raise("costmap: invalid origin {},{}", h.originX, h.originY);
         }
         Grid g;
         g.buf = std::move(bytes);
@@ -146,24 +131,15 @@ public:
     QByteArray const& bytes() const noexcept { return buf; }
     bool isEmpty() const noexcept { return buf.isEmpty(); }
 
-    LegacyGridHeader const& baseHeader() const noexcept {
-        return *reinterpret_cast<LegacyGridHeader const*>(buf.constData());
+    GridHeader const& header() const noexcept {
+        return *reinterpret_cast<GridHeader const*>(buf.constData());
     }
-    int width() const noexcept { return baseHeader().width; }
-    int height() const noexcept { return baseHeader().height; }
-    double resolution() const noexcept { return baseHeader().resolution; }
+    int width() const noexcept { return header().width; }
+    int height() const noexcept { return header().height; }
+    double resolution() const noexcept { return header().resolution; }
     int cellCount() const noexcept { return width() * height(); }
-    int headerSize() const noexcept {
-        return buf.size() == LegacyHeaderSize + cellCount() ? LegacyHeaderSize : HeaderSize;
-    }
-    double originX() const noexcept {
-        return headerSize() == HeaderSize
-            ? reinterpret_cast<GridHeader const*>(buf.constData())->originX : 0.0;
-    }
-    double originY() const noexcept {
-        return headerSize() == HeaderSize
-            ? reinterpret_cast<GridHeader const*>(buf.constData())->originY : 0.0;
-    }
+    double originX() const noexcept { return header().originX; }
+    double originY() const noexcept { return header().originY; }
     bool sameGeometry(const Grid& other) const noexcept {
         return width() == other.width() && height() == other.height() &&
             std::abs(resolution() - other.resolution()) <= 1e-6 &&
@@ -171,8 +147,8 @@ public:
             std::abs(originY() - other.originY()) <= 1e-6;
     }
 
-    const char* cells() const noexcept { return buf.constData() + headerSize(); }
-    char* cells() { const auto offset = headerSize(); return buf.data() + offset; }
+    const char* cells() const noexcept { return buf.constData() + HeaderSize; }
+    char* cells() { return buf.data() + HeaderSize; }
 
     void clear(int value = 0) {
         if (!buf.isEmpty()) std::memset(cells(), quint8(value), size_t(cellCount()));

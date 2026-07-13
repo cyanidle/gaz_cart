@@ -18,6 +18,7 @@
 // re-applies a full config table (same shape, defaults re-applied).
 
 #include <QImage>
+#include <QBuffer>
 #include <QTimer>
 #include <QDir>
 #include <map>
@@ -110,6 +111,70 @@ public:
 
     QVariant Reload(CostmapServerConfig conf) {
         apply(std::move(conf));
+        return true;
+    }
+
+    QVariant DumpMap() {
+        if (slamMap.isEmpty()) Raise("CostmapServer.DumpMap: no map available");
+
+        QImage image(slamMap.width(), slamMap.height(), QImage::Format_ARGB32);
+        for (int y = 0; y < slamMap.height(); ++y) {
+            const int imageY = slamMap.height() - 1 - y;
+            for (int x = 0; x < slamMap.width(); ++x) {
+                const auto cost = slamMap.at(x, y);
+                if (cost == nav::Grid::UnknownCost) {
+                    image.setPixel(x, imageY, qRgba(127, 127, 127, 0));
+                } else {
+                    const auto gray = 255 - cost * 255 / nav::Grid::MaxCost;
+                    image.setPixel(x, imageY, qRgba(gray, gray, gray, 255));
+                }
+            }
+        }
+        image.setText("gaz_cart.format", "GAMP");
+        image.setText("gaz_cart.resolution", QString::number(slamMap.resolution(), 'g', 16));
+        image.setText("gaz_cart.origin_x", QString::number(slamMap.originX(), 'g', 16));
+        image.setText("gaz_cart.origin_y", QString::number(slamMap.originY(), 'g', 16));
+
+        QByteArray png;
+        QBuffer buffer(&png);
+        buffer.open(QIODevice::WriteOnly);
+        if (!image.save(&buffer, "PNG")) Raise("CostmapServer.DumpMap: PNG encoding failed");
+        return png;
+    }
+
+    QVariant LoadMap(QVariant const& data) {
+        const auto png = data.toByteArray();
+        QImage image;
+        if (!image.loadFromData(png)) Raise("CostmapServer.LoadMap: invalid image data");
+        image = image.convertToFormat(QImage::Format_ARGB32);
+
+        bool resolutionOk = false;
+        bool originXOk = false;
+        bool originYOk = false;
+        auto resolution = image.text("gaz_cart.resolution").toDouble(&resolutionOk);
+        auto originX = image.text("gaz_cart.origin_x").toDouble(&originXOk);
+        auto originY = image.text("gaz_cart.origin_y").toDouble(&originYOk);
+        if (!resolutionOk || resolution <= 0) resolution = config.resolution.value;
+        if (!originXOk) originX = 0;
+        if (!originYOk) originY = 0;
+
+        nav::Grid loaded;
+        loaded.reset(image.width(), image.height(), resolution, originX, originY,
+                     nav::Grid::UnknownCost);
+        for (int y = 0; y < loaded.height(); ++y) {
+            const int imageY = loaded.height() - 1 - y;
+            for (int x = 0; x < loaded.width(); ++x) {
+                const auto pixel = image.pixel(x, imageY);
+                if (qAlpha(pixel) < 128) {
+                    loaded.setUnknown(x, y);
+                } else {
+                    const auto cost =
+                        (255 - qGray(pixel)) * nav::Grid::MaxCost / 255;
+                    loaded.set(x, y, cost);
+                }
+            }
+        }
+        onStaticMap(loaded.bytes());
         return true;
     }
 
@@ -256,6 +321,8 @@ private:
 void registerCostmapServer(Instance* inst) {
     inst->RegisterWorker<CostmapServer>("CostmapServer", {
         {"Reload", AsExtraMethod<&CostmapServer::Reload>},
+        {"DumpMap", AsExtraMethod<&CostmapServer::DumpMap>},
+        {"LoadMap", AsExtraMethod<&CostmapServer::LoadMap>},
     });
     inst->RegisterSchema<CostmapServerConfig>("CostmapServer");
 }

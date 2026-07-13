@@ -17,9 +17,11 @@ local raw_x = 0.5
 local desired_theta = 0.25
 local movement_started = false
 local worst_error = 0
+local discovery_disabled = false
 pipe(model, function(msg)
     if msg.position then latest = msg.position end
     if msg.slam then received = msg.slam.received_scans or received end
+    if msg.discovery_enabled ~= nil then discovery_disabled = not msg.discovery_enabled end
     local dx = raw_x - 0.5
     local expected_x = 2.0 + math.cos(desired_theta) * dx
     local expected_y = 2.0 + math.sin(desired_theta) * dx
@@ -27,7 +29,7 @@ pipe(model, function(msg)
         local error = math.sqrt((latest.x - expected_x)^2 + (latest.y - expected_y)^2)
         worst_error = math.max(worst_error, error)
     end
-    if not passed and repositioned and raw_x >= 0.8 and received >= 8
+    if not passed and repositioned and discovery_disabled and raw_x >= 0.8 and received >= 8
             and math.abs(latest.x - expected_x) < 0.08
             and math.abs(latest.y - expected_y) < 0.08 then
         passed = true
@@ -48,6 +50,9 @@ after(400, function()
     repositioned = true
     received = 0
     model { reposition = { x = 2.0, y = 2.0, theta = desired_theta } }
+    after(250, function()
+        model { discovery_enabled = false }
+    end)
     after(350, function()
         movement_started = true
         each(50, function()
