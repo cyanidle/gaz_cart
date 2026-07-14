@@ -36,17 +36,25 @@
 ---@field id integer?
 ---@field source_id integer?
 
----@class CostmapServer : Worker
+---@class CostmapServer : Worker<CostmapInput, CostmapOutput>
 ---@field Reload fun(self: CostmapServer, cfg: CostmapServerConfig): boolean -- re-apply a full config table (defaults re-applied)
 ---@field DumpMap fun(self: CostmapServer): bytes -- PNG of current SLAM/loaded map, including geometry metadata
 ---@field LoadMap fun(self: CostmapServer, image: bytes): boolean -- transparent pixels are unknown
 
+---@class CostmapInput
+---@field objects MapObject|MapObject[]?
+---@field point NavPose? manual obstacle
+---@field static_map Bytes? GAMP grid from Slam
+
+---@class CostmapOutput
+---@field costmap Bytes GAMP grid: header followed by cost bytes
+
 ---Costmap aggregator/publisher.
----Input fields:  `objects` (MapObject or MapObject[]), `point` (NavPose: manual
+---Input (`CostmapInput`) fields: `objects` (MapObject or MapObject[]), `point` (NavPose: manual
 ---obstacle, cleared keep_points_ms after the last one), `static_map` (a GAMP
 ---grid from Slam; its dimensions, resolution and origin are adopted dynamically,
 ---then it is merged and inflated with the other layers).
----Output (data channel), every update_rate_ms: `costmap` — one immutable bytes
+---Output (`CostmapOutput`, data channel), every update_rate_ms: `costmap` — one immutable bytes
 ---buffer: GridHeader (magic "GAMP", width, height, resolution, origin_x,
 ---origin_y) + one row-major byte per cell: 0..100 cost or 255 unknown (see
 ---nav/nav_common.hpp). Consumers (planners, QML DataView) reinterpret the
@@ -76,16 +84,26 @@ function CostmapServer(cfg) end
 ---@field consider_reached_after number? -- s of local-planner idle to finish a target (default 1.5)
 ---@field min_time_for_target number? -- s before idle can finish a fresh target (default 0.5)
 
----@class GlobalPlanner : Worker
+---@class GlobalPlanner : Worker<GlobalPlannerInput, GlobalPlannerOutput>
 ---@field Reload fun(self: GlobalPlanner, cfg: GlobalPlannerConfig): boolean -- re-apply a full config table (defaults re-applied)
+
+---@class GlobalPlannerInput
+---@field costmap Bytes?
+---@field position NavPose?
+---@field target NavPose?
+---@field cancel any?
+---@field status LocalPlannerStatus?
+
+---@class GlobalPlannerOutput
+---@field path NavPose[] empty on failure/cancel
 
 ---A* planner on the costmap, replanning on a timer while a target is active.
 ---Unknown cells are traversable using `a_star.unknown_cost`; known obstacle
 ---costs above `max_cost` remain impassable.
----Input fields:  `costmap` (CostmapServer bytes), `position` (NavPose),
+---Input (`GlobalPlannerInput`) fields: `costmap` (CostmapServer bytes), `position` (NavPose),
 ---`target` (NavPose command), `cancel` (any non-nil), `status` (LocalPlanner's,
 ---finishes the target once reached && rotated and idle long enough).
----Output (data channel): `path` — NavPose[]; empty on failure / cancel.
+---Output (`GlobalPlannerOutput`, data channel): `path` — NavPose[]; empty on failure / cancel.
 ---Events: `planning` — "success" | "failed".
 ---@param cfg GlobalPlannerConfig
 ---@return GlobalPlanner
@@ -139,15 +157,27 @@ function GlobalPlanner(cfg) end
 ---@field driving_for number -- s
 ---@field idle_for number -- s
 
----@class LocalPlanner : Worker
+---@class LocalPlanner : Worker<LocalPlannerInput, LocalPlannerOutput>
 ---@field Reload fun(self: LocalPlanner, cfg: LocalPlannerConfig): boolean -- re-apply a full config table (defaults re-applied)
+
+---@class LocalPlannerInput
+---@field path NavPose[]?
+---@field costmap Bytes?
+---@field position NavPose?
+---@field pause boolean?
+---@field cancel boolean?
+
+---@class LocalPlannerOutput
+---@field cmd_vel NavPose body-frame normalized command: x forward, theta yaw
+---@field status LocalPlannerStatus
+---@field local_target NavPose?
 
 ---Path follower: drives toward the furthest cheaply-reachable path point,
 ---rotates into the goal heading, reports status. Unknown cells count as maximum
 ---danger and are locally inflated by `path.unknown_inflation_radius`.
----Input fields:  `path` (NavPose[]; empty stops the robot), `costmap`
+---Input (`LocalPlannerInput`) fields: `path` (NavPose[]; empty stops the robot), `costmap`
 ---(CostmapServer bytes), `position` (NavPose), `pause` (bool: freeze while true).
----Output (data channel), every tick: `cmd_vel` (NavPose: body-frame speed
+---Output (`LocalPlannerOutput`, data channel), every tick: `cmd_vel` (NavPose: body-frame speed
 ---+ fractions -1..1), `status` (LocalPlannerStatus — feed back to GlobalPlanner),
 ---`local_target` (NavPose; only while a path is active).
 ---@param cfg LocalPlannerConfig
@@ -211,16 +241,41 @@ function LocalPlanner(cfg) end
 ---@field network LidarNetworkConfig?
 ---@field sim LidarSimConfig? -- present => simulate instead of using hardware
 
----@class Lidar : Worker
+---@class Lidar : Worker<LidarInput, LidarOutput>
 ---@field Reload fun(self: Lidar, cfg: LidarConfig): boolean -- re-apply a full config table (defaults re-applied)
+
+---@class LaserScanPoint
+---@field x number world x, m
+---@field y number world y, m
+
+---@class LaserScan
+---@field pose NavPose scan-time robot pose in the map frame
+---@field points LaserScanPoint[] world-frame hits
+---@field ranges number[] range per beam, m
+---@field angle_min number radians
+---@field angle_max number radians
+---@field angle_increment number radians
+---@field range_min number meters
+---@field range_max number meters
+---@field timestamp number Unix time, seconds
+
+---@class LidarInput
+---@field position NavPose? map-frame robot pose
+---@field scan number[]|{angle: number, range: number}[]?
+---@field sim_obstacle SimObstacle?
+---@field clear_sim any?
+
+---@class LidarOutput
+---@field objects MapObject[]
+---@field scan LaserScan
 
 ---RPLidar-driven obstacle detector (port of bigbang's rplidarnode). Parses each
 ---beam to a world point using the latest pose, segments them into objects, and
 ---emits them as the costmap's `objects` list.
----Input fields:  `position` (NavPose), `scan` (inject a raw scan: number[] of
+---Input (`LidarInput`) fields: `position` (NavPose), `scan` (inject a raw scan: number[] of
 ---ranges, or { angle, range }[]), `sim_obstacle` (SimObstacle, sim mode),
 ---`clear_sim` (any non-nil: drop sim obstacles).
----Output (data channel), per scan: `objects` (MapObject[] for the costmap),
+---Output (`LidarOutput`, data channel), per scan: `objects` (MapObject[] for the costmap),
 ---`scan` ({ pose, points, ranges, angle_min, angle_max, angle_increment,
 ---range_min, range_max, timestamp }); the range fields intentionally mirror
 ---ROS LaserScan and are consumed directly by the Slam worker.

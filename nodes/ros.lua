@@ -37,6 +37,7 @@ return function(cfg)
         subs = {
             [topic] = {
                 type = "geometry_msgs/msg/Twist",
+                ---@param twist RosTwist
                 handler = function(twist)
                     -- Normalise Twist (SI → -1..1) so drive() can clamp + scale
                     local v     = twist.linear.x  / max_lin

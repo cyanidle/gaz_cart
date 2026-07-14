@@ -8,16 +8,19 @@
 --    shift+click — manually reposition the robot/map pose
 --    right click — drop a temporary obstacle into the costmap
 --
---  Robot loop: cfg.odometry() feeds timestamped pose/twist/covariance to SLAM;
---  SLAM's corrected pose feeds the planners. LocalPlanner's
+--  Robot loop: cfg.odometry() publishes `odom -> base_link`; this node queries
+--  a shared tf-style `map -> odom` transform before feeding SLAM/planners.
+--  LocalPlanner's
 --  cmd_vel (-1..1) is handed to cfg.drive(v, omega).  cfg.sim only controls
 --  whether lidar is simulated or real — drive/pose are SIM-aware already.
 -- =============================================================================
 
-load_plugin(SCRIPT_DIR .. "/../build/nav/libgaz_nav")
-load_plugin(SCRIPT_DIR .. "/../build/slam/libgaz_slam")
-
 local socket = require "socket"
+
+local NODE_DIR = SCRIPT_DIR or "."
+if NODE_DIR:sub(1, 1) ~= "/" and lfs and lfs.currentdir then
+    NODE_DIR = assert(lfs.currentdir()) .. "/" .. NODE_DIR
+end
 
 local UPDATE_MS    = 50
 local ROBOT_RADIUS = 0.1
@@ -33,18 +36,31 @@ local SIM_OBSTACLES = {
 local SIM_OBSTACLE_RADIUS = 0.1 -- radius for obstacles dropped via right-click
 
 ---@class NavConfig
----@field model Pipable GUI model node from branch(); sends wrapped, receives unwrapped
+---@field model Pipable<NavGuiTelemetry, NavGuiCommand> GUI node: emits navigation state, receives commands
 ---@field sim boolean? -- default false; sim robot + sim lidar instead of real hardware
 ---@field drive (fun(v: number, omega: number))? body twist sink (m/s, rad/s); required when sim=false
 ---@field pose (fun(): number, number, number)? robot pose source x, y, theta; required when sim=false
----@field odometry (fun(): table)? full pose/twist/covariance source; preferred over pose
----@field lidar_port string? serial device of a real RPLidar (ignored when sim=true)
+---@field odometry (fun(): CartOdometry)? full pose/twist/covariance source; preferred over pose
+---@field frames Frames? shared native tf-style worker; defaults to a private map -> odom tree
+---@field plugins NavPluginPaths? plugin library locations; set plugins.slam=false to run without SLAM
+---@field workers NavPluginWorkers? config passed directly to nav/SLAM plugin workers
 
 ---Wire the navigation stack.
 ---@param cfg NavConfig
 return function(cfg)
     local sim = cfg.sim
     local mapDiscovery = true
+    local plugins = cfg.plugins or {}
+    local workers = cfg.workers or {}
+
+    -- Plugin locations and all individual worker settings are supplied through
+    -- cfg.  The defaults keep this checkout runnable while allowing a deployed
+    -- cart to point at packaged/out-of-tree plugins without editing this node.
+    load_plugin(plugins.nav or (NODE_DIR .. "/../build/nav/libgaz_nav"))
+    local useSlam = plugins.slam ~= false
+    if useSlam then
+        load_plugin(plugins.slam or (NODE_DIR .. "/../build/slam/libgaz_slam"))
+    end
 
     assert(cfg.drive, "cfg.drive required")
     assert(cfg.odometry or cfg.pose, "cfg.odometry or cfg.pose required")
@@ -52,10 +68,19 @@ return function(cfg)
     -- Keep pose-only sources working for standalone smoke tests and external
     -- users, but normalize the rest of this node onto one complete state.
     local function rawOdometry()
-        if cfg.odometry then return cfg.odometry() end
+        if cfg.odometry then
+            local odometry = cfg.odometry()
+            -- `frame_id`/`child_frame_id` became explicit with the frame tree.
+            -- Accept older producers during migration as conventional odometry.
+            odometry.frame_id = odometry.frame_id or "odom"
+            odometry.child_frame_id = odometry.child_frame_id or "base_link"
+            return odometry
+        end
         local x, y, theta = cfg.pose()
         return {
             timestamp = socket.gettime(),
+            frame_id = "odom",
+            child_frame_id = "base_link",
             pose = { x = x, y = y, theta = theta },
             twist = { linear = 0, angular = 0 },
             pose_covariance = {
@@ -66,61 +91,24 @@ return function(cfg)
         }
     end
 
-    -- Manual positioning changes the map-frame origin without modifying the
-    -- wheel odometry source. This works for both simulated and real odometry:
-    -- subsequent motion is composed onto the pose selected in NavView.
-    local poseOffset = { x = 0, y = 0, theta = 0 }
-    local lastRawPose
-    local function normalizeTheta(theta)
-        return (theta + math.pi) % (2 * math.pi) - math.pi
+    local frames = cfg.frames
+    if not frames then
+        load_plugin(plugins.frames or (NODE_DIR .. "/../build/frames/libgaz_frames"))
+        frames = Frames { name = "frames" }
     end
-    local function composePose(a, b)
-        local c, s = math.cos(a.theta), math.sin(a.theta)
-        return {
-            x = a.x + c * b.x - s * b.y,
-            y = a.y + s * b.x + c * b.y,
-            theta = normalizeTheta(a.theta + b.theta),
-        }
-    end
-    local function inversePose(p)
-        local c, s = math.cos(p.theta), math.sin(p.theta)
-        return {
-            x = -c * p.x - s * p.y,
-            y =  s * p.x - c * p.y,
-            theta = normalizeTheta(-p.theta),
-        }
-    end
-    local function adjustedPose(raw)
-        return composePose(poseOffset, raw)
+    -- The map frame starts coincident with odometry. Localization and the UI
+    -- may subsequently move only this transform; wheel integration is never
+    -- patched or re-based.
+    if not frames:lookup("map", "odom") then
+        frames:set("map", "odom", { x = 0, y = 0, theta = 0 })
     end
 
-    local function adjustedOdometry(raw)
-        local out = {
-            timestamp = raw.timestamp,
-            pose = adjustedPose(raw.pose),
-            twist = raw.twist,
-            twist_covariance = raw.twist_covariance,
-        }
-        local p = raw.pose_covariance
-        if p then
-            -- A manual map-frame offset rotates x/y uncertainty. Body-frame
-            -- twist and its covariance do not change.
-            local c, s = math.cos(poseOffset.theta), math.sin(poseOffset.theta)
-            local xx, xy, xt = p.xx or 0, p.xy or 0, p.xtheta or 0
-            local yy, yt, tt = p.yy or 0, p.ytheta or 0, p.thetatheta or 0
-            out.pose_covariance = {
-                xx = c*c*xx - 2*c*s*xy + s*s*yy,
-                xy = c*s*xx + (c*c-s*s)*xy - c*s*yy,
-                xtheta = c*xt - s*yt,
-                yy = s*s*xx + 2*c*s*xy + c*c*yy,
-                ytheta = s*xt + c*yt,
-                thetatheta = tt,
-            }
-        end
-        return out
+    local lastRawOdometry
+    local function mapOdometry(raw)
+        return frames:transform_odometry(raw, "map")
     end
 
-    local costmap = CostmapServer {
+    local costmap = CostmapServer(merge({
         name = "costmap_server",
         update_rate_ms = 100,
         keep_points_ms = 30000,
@@ -128,32 +116,32 @@ return function(cfg)
         inflate = { robot_safe_radius = ROBOT_RADIUS },
         inflate_static = { robot_safe_radius = ROBOT_RADIUS },
         -- image = SCRIPT_DIR .. "/costmap.png",  -- optional static map
-    }
+    }, workers.costmap))
 
-    local gp = GlobalPlanner {
+    local gp = GlobalPlanner(merge({
         name = "global_planer",
         update_rate_ms = 100,
         a_star = { max_cost = 35 },
-    }
+    }, workers.global_planner))
 
-    local lp = LocalPlanner {
+    local lp = LocalPlanner(merge({
         name = "local_planer",
         tick_rate = 20,
         margins = { position = 0.03, theta = 0.05 },
-    }
+    }, workers.local_planner))
 
-    -- Lidar: sim mode gets a raycasting emulator; real mode uses a hardware
-    -- RPLidar when lidar_port is given. Detected obstacles feed the costmap;
+    -- Lidar: sim mode gets a raycasting emulator; real mode is enabled by a
+    -- `workers.lidar` plugin config. Detected obstacles feed the costmap;
     -- the raw scan goes to the GUI for visualization.
     local lidar
     if sim then
-        lidar = Lidar {
+        lidar = Lidar(merge({
             name = "lidar",
             scan_frequency = 12,
             sim = { beams = 360, obstacles = SIM_OBSTACLES },
-        }
-    elseif cfg.lidar_port then
-        lidar = Lidar { name = "lidar", serial = { port = cfg.lidar_port } }
+        }, workers.lidar))
+    elseif workers.lidar then
+        lidar = Lidar(merge({ name = "lidar" }, workers.lidar))
     end
     if lidar then
         -- SLAM consumes the LaserScan-shaped payload (ranges + geometry), not
@@ -171,8 +159,8 @@ return function(cfg)
     -- CostmapServer adopts the map's changing dimensions and world origin, so
     -- Lua only renames `map` to `static_map` at the boundary.
     local slam
-    if lidar then
-        slam = Slam {
+    if lidar and useSlam then
+        slam = Slam(merge({
             name = "slam",
             map = {
                 resolution = 0.02,
@@ -191,11 +179,17 @@ return function(cfg)
                 do_loop_closing = not sim,
             },
             solver = { threads = 2 },
-        }
+        }, workers.slam))
         pipe(lidar, slam)
         pipe(slam, function(m)
             if m.map and mapDiscovery then costmap { static_map = m.map } end
             if m.odometry or m.position then
+                -- SLAM's map-frame correction becomes a first-class tf edge.
+                -- Every downstream user therefore sees the same map -> odom
+                -- relation instead of each node carrying an offset.
+                if m.odometry and lastRawOdometry then
+                    frames:reanchor("map", "odom", lastRawOdometry.pose, m.odometry.pose)
+                end
                 local position = m.odometry and m.odometry.pose or m.position
                 local p = { position = position, odometry = m.odometry }
                 gp(p)
@@ -220,13 +214,12 @@ return function(cfg)
     pipe(gp, cfg.model)      -- path
     pipe(lp, cfg.model)      -- status
 
-    -- Raw wheel odometry is transformed into the manually selected map frame.
-    -- The simulated lidar must use this ground-truth pose only; feeding SLAM's
-    -- corrected estimate back into it creates a localization feedback loop.
-    local function publish_odometry(odom)
+    -- The wheel producer publishes odom -> base_link. This node merely queries
+    -- map -> odom from the shared frame tree before wiring the result onward.
+    local function publish_odometry(raw)
+        lastRawOdometry = raw
+        local odom = mapOdometry(raw)
         if lidar then
-            -- Lidar gets raw/map-adjusted wheel pose, never SLAM output. This
-            -- prevents a localization feedback loop in projected scan points.
             lidar { position = odom.pose }
         end
         if slam then
@@ -282,24 +275,18 @@ return function(cfg)
             end
         end
         if msg.reposition then
-            local desired = msg.reposition
-            local raw = lastRawPose
-            if not raw then
-                raw = rawOdometry().pose
-                lastRawPose = raw
-            end
-            desired = {
-                x = desired.x,
-                y = desired.y,
-                theta = desired.theta or adjustedPose(raw).theta,
+            local raw = lastRawOdometry or rawOdometry()
+            local current = mapOdometry(raw).pose
+            local desired = {
+                x = msg.reposition.x,
+                y = msg.reposition.y,
+                theta = msg.reposition.theta or current.theta,
             }
-            poseOffset = composePose(desired, inversePose(raw))
+            frames:reanchor("map", "odom", raw.pose, desired)
             lp { cancel = true }
             gp { cancel = true }
             if slam then slam:Reset() end
-            local current = rawOdometry()
-            current.pose = raw
-            publish_odometry(adjustedOdometry(current))
+            publish_odometry(raw)
         end
     end)
 
@@ -311,7 +298,6 @@ return function(cfg)
     end)
     each(UPDATE_MS, function()
         local raw = rawOdometry()
-        lastRawPose = raw.pose
-        publish_odometry(adjustedOdometry(raw))
+        publish_odometry(raw)
     end)
 end

@@ -14,7 +14,7 @@
 local Odometry = {}
 Odometry.__index = Odometry
 
----@param opts { trackWidth: number, wheelSpeedStdDev: number?, initialPoseStdDev: table? }
+---@param opts { trackWidth: number, wheelSpeedStdDev: number?, initialPoseStdDev: table?, frameId: string?, childFrameId: string?, frames: Frames? }
 ---`wheelSpeedStdDev` is the 1-sigma uncertainty of one wheel's linear-speed
 ---measurement in m/s. `initialPoseStdDev` may contain x/y/theta standard
 ---deviations. Both default to zero (deterministic odometry).
@@ -28,6 +28,9 @@ function Odometry.new(opts)
     local initialPtt = (initial.theta or 0.0)^2
     return setmetatable({
         trackWidth = opts.trackWidth,
+        frameId = opts.frameId or "odom",
+        childFrameId = opts.childFrameId or "base_link",
+        frames = opts.frames,
         wheelVariance = wheelVariance,
         -- global pose
         x = 0.0, y = 0.0, theta = 0.0,
@@ -49,6 +52,13 @@ function Odometry.new(opts)
         cww = wheelVariance / (opts.trackWidth * opts.trackWidth),
         timestamp = nil,
     }, Odometry)
+end
+
+function Odometry:publishFrame()
+    if self.frames then
+        self.frames:set(self.frameId, self.childFrameId,
+            { x = self.x, y = self.y, theta = self.theta })
+    end
 end
 
 --- Feed the four wheel linear velocities (m/s) and the time step (s).
@@ -97,6 +107,7 @@ function Odometry:update(vFL, vFR, vRL, vRR, dt, timestamp)
     self.pxx, self.pxy, self.pxt = pxx, pxy, pxt
     self.pyy, self.pyt, self.ptt = pyy, pyt, ptt
     self.timestamp = timestamp or self.timestamp
+    self:publishFrame()
     return self
 end
 
@@ -109,6 +120,8 @@ function Odometry:thetaDeg()  return self.theta * 180.0 / math.pi end
 function Odometry:odometry(timestamp)
     return {
         timestamp = timestamp or self.timestamp,
+        frame_id = self.frameId,
+        child_frame_id = self.childFrameId,
         pose = { x = self.x, y = self.y, theta = self.theta },
         twist = { linear = self.v, angular = self.omega },
         pose_covariance = {
@@ -130,6 +143,7 @@ function Odometry:reset(start)
     self.pxx, self.pxy, self.pxt = self.initialPxx, 0.0, 0.0
     self.pyy, self.pyt, self.ptt = self.initialPyy, 0.0, self.initialPtt
     self.timestamp = start.timestamp
+    self:publishFrame()
     return self
 end
 

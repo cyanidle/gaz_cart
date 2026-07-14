@@ -11,7 +11,7 @@ local Odometry = require "mods.odometry"
 local socket   = require "socket"
 
 ---@class OdoConfig
----@field model Pipable GUI model node from branch(); sends wrapped, receives unwrapped
+---@field model Pipable<OdoGuiTelemetry, OdoGuiCommand> GUI node: emits telemetry, receives commands
 ---@field track_width number distance between left and right wheels, m
 ---@field wheels fun(): table<string, {tgt: number, act: number}> per-wheel target + actual linear speed, m/s
 ---@field set_speed fun(wheel: string?, value: number) closed-loop speed target, m/s
@@ -20,6 +20,9 @@ local socket   = require "socket"
 ---@field odo_period_ms integer? odometry integration period (default 20)
 ---@field telem_period_ms integer? telemetry stream period (default 100)
 ---@field wheel_speed_stddev number? per-wheel speed 1-sigma uncertainty, m/s
+---@field frames Frames? native tf-style worker receiving odom -> base_link
+---@field odom_frame string? pose frame id (default "odom")
+---@field base_frame string? body frame id (default "base_link")
 
 ---Wire the odometry/tuning node.
 ---@param cfg OdoConfig
@@ -28,6 +31,9 @@ return function(cfg)
     local odo = Odometry.new {
         trackWidth = cfg.track_width,
         wheelSpeedStdDev = cfg.wheel_speed_stddev,
+        frameId = cfg.odom_frame,
+        childFrameId = cfg.base_frame,
+        frames = cfg.frames,
     }
 
     local last_t

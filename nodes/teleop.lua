@@ -7,7 +7,7 @@
 -- =============================================================================
 
 ---@class TeleopConfig
----@field model Pipable GUI model node from branch(); sends wrapped, receives unwrapped
+---@field model Pipable<any, TeleopGuiCommand> GUI node: receives normalized twist commands
 ---@field drive fun(v: number, omega: number) body twist sink (m/s, rad/s)
 
 ---Wire the teleop node.

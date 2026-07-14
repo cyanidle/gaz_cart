@@ -108,21 +108,35 @@
 ---@field pose_covariance SlamPoseCovariance
 ---@field twist_covariance SlamTwistCovariance
 
+---@class SlamInput
+---@field odometry SlamOdometry|NavPose? wheel/localization prior; legacy pose accepted
+---@field scan LaserScan? scan from Lidar
+---@field pause boolean?
+---@field reset any?
+
+---@class SlamOutput
+---@field odometry SlamOdometry? map-corrected state
+---@field position NavPose? legacy alias of odometry.pose
+---@field map Bytes? origin-aware GAMP occupancy grid
+---@field scan LaserScan? map-corrected scan
+---@field covariance SlamPoseCovariance?
+---@field slam SlamStats?
+
 ---@class SlamStats
 ---@field received_scans integer
 ---@field processed_scans integer
 ---@field localized boolean
 ---@field paused boolean
 
----@class Slam : Worker
+---@class Slam : Worker<SlamInput, SlamOutput>
 ---@field Reload fun(self: Slam, cfg: SlamConfig): boolean
 ---@field Reset fun(self: Slam): boolean
 ---@field Save fun(self: Slam, base_path: string): boolean writes `.posegraph` and `.data`
 
 ---Online Karto/Ceres SLAM worker.
----Input: `odometry` (SlamOdometry; legacy NavPose is accepted), `scan` (the Lidar worker's LaserScan-shaped
+---Input (`SlamInput`): `odometry` (SlamOdometry; legacy NavPose is accepted), `scan` (the Lidar worker's LaserScan-shaped
 ---payload), `pause` (bool), and `reset` (any non-nil).
----Output: `odometry` (complete map-corrected state), `position` (legacy alias
+---Output (`SlamOutput`): `odometry` (complete map-corrected state), `position` (legacy alias
 ---of odometry.pose), `map` (origin-aware, dynamically
 ---bounded GAMP occupancy bytes; 0 free, 100 occupied, 255 unknown),
 ---`scan` (corrected world-frame hit points), `covariance`, and `slam` stats.

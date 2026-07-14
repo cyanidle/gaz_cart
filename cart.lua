@@ -13,6 +13,8 @@
 
 local config_defs = require "mods.config_defs"
 local Odometry   = require "mods.odometry"
+local DiffDrive  = require "mods.diff_drive"
+local Rational   = require "mods.rational"
 local socket     = require "socket"
 
 -- ---- Tunables --------------------------------------------------------------
@@ -31,6 +33,18 @@ local SIM_START_X  = 0.5     -- initial sim robot x, m
 local SIM_START_Y  = 0.5     -- initial sim robot y, m
 local REAL_WHEEL_SPEED_STDDEV = 0.05 -- measured wheel-speed 1-sigma noise, m/s
 local SIM_WHEEL_SPEED_STDDEV  = 0.0  -- deterministic mocked encoders
+local FRAMES_PLUGIN = SCRIPT_DIR .. "/build/frames/libgaz_frames"
+
+-- Plugin workers remain opaque implementation details of nodes/nav.lua. Their
+-- paths and full plugin-native config are declarative here, next to the rest
+-- of deployment setup. Nested fields override the node defaults.
+---@type NavPluginPaths
+local NAV_PLUGINS = {}
+---@type NavPluginWorkers
+local NAV_WORKERS = {
+    -- lidar = { serial = { port = "/dev/ttyUSB0" } }, -- real robot example
+    -- slam = { mapper = { do_loop_closing = true } },
+}
 
 -- Wheel module node ids (set by each module's DIP switches).  Keys are the
 -- wheel names used throughout the script; values are Cyphal node ids.
@@ -64,6 +78,7 @@ for w, nid in pairs(WHEELS) do
     publish  ["cfg_" .. w] = { type = "uavcan.primitive.array.Integer32.1.0", port = PORT.config       + nid }
 end
 
+---@type Worker<CartCyphalInput, CartCyphalOutput>
 local cyphal = Cyphal {
     can       = can,
     node_id   = NODE_ID,
@@ -105,42 +120,38 @@ end
 --  In sim mode the twist is integrated into a local Odometry instance
 --  (mocked motors); in real mode it is published to Cyphal.
 local sim_last_t = socket.gettime()
+load_plugin(FRAMES_PLUGIN)
+local frames = Frames { name = "frames" }
 local sim_odo = Odometry.new {
     trackWidth = TRACK_WIDTH,
     wheelSpeedStdDev = SIM_WHEEL_SPEED_STDDEV,
+    frames = frames,
 }
 sim_odo:reset { x = SIM_START_X, y = SIM_START_Y, theta = 0, timestamp = sim_last_t }
 
 local drive
 if SIM then
     drive = function(v, omega)
-        v     = math.max(-1, math.min(1, v or 0))
-        omega = math.max(-1, math.min(1, omega or 0))
-        local v_real = v * MAX_LIN_SPD * 2
-        local omega_real = omega * MAX_ROT_SPD * 3
-        local half = TRACK_WIDTH * 0.5
-        local vL = v_real - omega_real * half
-        local vR = v_real + omega_real * half
+        local wheel = DiffDrive.wheels(v, omega, {
+            track_width = TRACK_WIDTH, max_linear = MAX_LIN_SPD, max_angular = MAX_ROT_SPD,
+            linear_scale = 2, angular_scale = 3,
+        })
         local now = socket.gettime()
         local dt = now - sim_last_t
         sim_last_t = now
         if dt > 0.5 then dt = 0.05 end
-        sim_odo:update(vL, vR, vL, vR, dt, now)
+        sim_odo:update(wheel.fl, wheel.fr, wheel.rl, wheel.rr, dt, now)
     end
 else
     drive = function(v, omega)
-        v     = math.max(-1, math.min(1, v or 0))
-        omega = math.max(-1, math.min(1, omega or 0))
-        local v_real = v * MAX_LIN_SPD
-        local omega_real = omega * MAX_ROT_SPD
-        local half = TRACK_WIDTH * 0.5
-        local vL = v_real - omega_real * half
-        local vR = v_real + omega_real * half
-        wheel_tgt.fl, wheel_tgt.rl = vL, vL
-        wheel_tgt.fr, wheel_tgt.rr = vR, vR
+        local wheel = DiffDrive.wheels(v, omega, {
+            track_width = TRACK_WIDTH, max_linear = MAX_LIN_SPD, max_angular = MAX_ROT_SPD,
+        })
+        wheel_tgt.fl, wheel_tgt.rl = wheel.fl, wheel.rl
+        wheel_tgt.fr, wheel_tgt.rr = wheel.fr, wheel.rr
         cyphal {
-            cmd_fl = { value = vL }, cmd_rl = { value = vL },
-            cmd_fr = { value = vR }, cmd_rr = { value = vR },
+            cmd_fl = { value = wheel.fl }, cmd_rl = { value = wheel.rl },
+            cmd_fr = { value = wheel.fr }, cmd_rr = { value = wheel.rr },
         }
     end
 end
@@ -159,21 +170,6 @@ end
 
 -- ---- Config over Cyphal ----------------------------------------------------
 
-local function gcd(a, b)
-    a, b = math.abs(a), math.abs(b)
-    while b > 0.5 do a, b = b, a % b end
-    return a
-end
-
--- Express a float as an int32 numerator/denominator pair (value = num/den).
-local function to_rational(x)
-    local den = 1000000
-    local num = math.floor(x * den + (x >= 0 and 0.5 or -0.5))
-    local g   = gcd(num, den)
-    if g < 1 then g = 1 end
-    return math.floor(num / g), math.floor(den / g)
-end
-
 -- config_defs is keyed by parameter key; index it by id for lookups and stash
 -- the key on each entry so we can log/report it.
 local config_by_id = {}
@@ -189,7 +185,7 @@ local function set_config(wheel, id, value)
         log.warn("set_config: unknown config id {}", id)
         return
     end
-    local num, den = to_rational(value)
+    local num, den = Rational.from_number(value)
     if not wheel or wheel == "all" then
         for w in pairs(WHEELS) do
             cyphal { ["cfg_" .. w] = { value = { id, num, den } } }
@@ -241,6 +237,7 @@ local odo = require "nodes.odo" {
     odo_period_ms = ODO_PERIOD_MS,
     telem_period_ms = TELEM_PERIOD_MS,
     wheel_speed_stddev = REAL_WHEEL_SPEED_STDDEV,
+    frames = frames,
 }
 
 -- SIM-aware pose: returns simulated (mocked-motor) pose or real odometry.
@@ -268,6 +265,9 @@ require "nodes.nav" {
     drive = drive,
     pose  = pose,
     odometry = odometry,
+    frames = frames,
+    plugins = NAV_PLUGINS,
+    workers = NAV_WORKERS,
 }
 
 -- Keyboard teleop from the GUI. Shares drive() with the nav planner — only
