@@ -8,13 +8,16 @@
 --    shift+click — manually reposition the robot/map pose
 --    right click — drop a temporary obstacle into the costmap
 --
---  Robot loop: cfg.pose() feeds position to the planners; LocalPlanner's
+--  Robot loop: cfg.odometry() feeds timestamped pose/twist/covariance to SLAM;
+--  SLAM's corrected pose feeds the planners. LocalPlanner's
 --  cmd_vel (-1..1) is handed to cfg.drive(v, omega).  cfg.sim only controls
 --  whether lidar is simulated or real — drive/pose are SIM-aware already.
 -- =============================================================================
 
 load_plugin(SCRIPT_DIR .. "/../build/nav/libgaz_nav")
 load_plugin(SCRIPT_DIR .. "/../build/slam/libgaz_slam")
+
+local socket = require "socket"
 
 local UPDATE_MS    = 50
 local ROBOT_RADIUS = 0.1
@@ -34,6 +37,7 @@ local SIM_OBSTACLE_RADIUS = 0.1 -- radius for obstacles dropped via right-click
 ---@field sim boolean? -- default false; sim robot + sim lidar instead of real hardware
 ---@field drive (fun(v: number, omega: number))? body twist sink (m/s, rad/s); required when sim=false
 ---@field pose (fun(): number, number, number)? robot pose source x, y, theta; required when sim=false
+---@field odometry (fun(): table)? full pose/twist/covariance source; preferred over pose
 ---@field lidar_port string? serial device of a real RPLidar (ignored when sim=true)
 
 ---Wire the navigation stack.
@@ -43,7 +47,24 @@ return function(cfg)
     local mapDiscovery = true
 
     assert(cfg.drive, "cfg.drive required")
-    assert(cfg.pose, "cfg.pose required")
+    assert(cfg.odometry or cfg.pose, "cfg.odometry or cfg.pose required")
+
+    -- Keep pose-only sources working for standalone smoke tests and external
+    -- users, but normalize the rest of this node onto one complete state.
+    local function rawOdometry()
+        if cfg.odometry then return cfg.odometry() end
+        local x, y, theta = cfg.pose()
+        return {
+            timestamp = socket.gettime(),
+            pose = { x = x, y = y, theta = theta },
+            twist = { linear = 0, angular = 0 },
+            pose_covariance = {
+                xx = 0, xy = 0, xtheta = 0,
+                yy = 0, ytheta = 0, thetatheta = 0,
+            },
+            twist_covariance = { linear = 0, linear_angular = 0, angular = 0 },
+        }
+    end
 
     -- Manual positioning changes the map-frame origin without modifying the
     -- wheel odometry source. This works for both simulated and real odometry:
@@ -71,6 +92,32 @@ return function(cfg)
     end
     local function adjustedPose(raw)
         return composePose(poseOffset, raw)
+    end
+
+    local function adjustedOdometry(raw)
+        local out = {
+            timestamp = raw.timestamp,
+            pose = adjustedPose(raw.pose),
+            twist = raw.twist,
+            twist_covariance = raw.twist_covariance,
+        }
+        local p = raw.pose_covariance
+        if p then
+            -- A manual map-frame offset rotates x/y uncertainty. Body-frame
+            -- twist and its covariance do not change.
+            local c, s = math.cos(poseOffset.theta), math.sin(poseOffset.theta)
+            local xx, xy, xt = p.xx or 0, p.xy or 0, p.xtheta or 0
+            local yy, yt, tt = p.yy or 0, p.ytheta or 0, p.thetatheta or 0
+            out.pose_covariance = {
+                xx = c*c*xx - 2*c*s*xy + s*s*yy,
+                xy = c*s*xx + (c*c-s*s)*xy - c*s*yy,
+                xtheta = c*xt - s*yt,
+                yy = s*s*xx + 2*c*s*xy + c*c*yy,
+                ytheta = s*xt + c*yt,
+                thetatheta = tt,
+            }
+        end
+        return out
     end
 
     local costmap = CostmapServer {
@@ -134,19 +181,23 @@ return function(cfg)
                 occupancy_threshold = 0.1,
             },
             mapper = {
-                use_scan_matching = true,
+                -- Mock odometry and raycasts are exact. Letting scan matching
+                -- perturb that ground truth is the SIM version of SLAM and
+                -- odometry "fighting" each other.
+                use_scan_matching = not sim,
                 minimum_travel_distance = 0.04,
                 minimum_travel_heading = 0.04,
                 scan_buffer_size = 40,
-                do_loop_closing = true,
+                do_loop_closing = not sim,
             },
             solver = { threads = 2 },
         }
         pipe(lidar, slam)
         pipe(slam, function(m)
             if m.map and mapDiscovery then costmap { static_map = m.map } end
-            if m.position then
-                local p = { position = m.position }
+            if m.odometry or m.position then
+                local position = m.odometry and m.odometry.pose or m.position
+                local p = { position = position, odometry = m.odometry }
                 gp(p)
                 lp(p)
                 cfg.model(p)
@@ -172,14 +223,16 @@ return function(cfg)
     -- Raw wheel odometry is transformed into the manually selected map frame.
     -- The simulated lidar must use this ground-truth pose only; feeding SLAM's
     -- corrected estimate back into it creates a localization feedback loop.
-    local function publish_odometry(pos)
+    local function publish_odometry(odom)
         if lidar then
-            lidar { position = pos }
+            -- Lidar gets raw/map-adjusted wheel pose, never SLAM output. This
+            -- prevents a localization feedback loop in projected scan points.
+            lidar { position = odom.pose }
         end
         if slam then
-            slam { odometry = pos }
+            slam { odometry = odom }
         else
-            local msg = { position = pos }
+            local msg = { position = odom.pose, odometry = odom }
             gp(msg)
             lp(msg)
             cfg.model(msg)
@@ -232,8 +285,7 @@ return function(cfg)
             local desired = msg.reposition
             local raw = lastRawPose
             if not raw then
-                local x, y, theta = cfg.pose()
-                raw = { x = x, y = y, theta = theta }
+                raw = rawOdometry().pose
                 lastRawPose = raw
             end
             desired = {
@@ -245,19 +297,21 @@ return function(cfg)
             lp { cancel = true }
             gp { cancel = true }
             if slam then slam:Reset() end
-            publish_odometry(adjustedPose(raw))
+            local current = rawOdometry()
+            current.pose = raw
+            publish_odometry(adjustedOdometry(current))
         end
     end)
 
     -- ---- Robot loop ------------------------------------------------------------
-    -- Always use cfg.drive / cfg.pose — they are SIM-aware (cart.lua wires
+    -- Always use cfg.drive / rawOdometry — they are SIM-aware (cart.lua wires
     -- either real-Cyphal or mocked-motor versions depending on the SIM flag).
     on(lp, "cmd_vel", function(c)
         cfg.drive(c.x, c.theta)
     end)
     each(UPDATE_MS, function()
-        local x, y, theta = cfg.pose()
-        lastRawPose = { x = x, y = y, theta = theta }
-        publish_odometry(adjustedPose(lastRawPose))
+        local raw = rawOdometry()
+        lastRawPose = raw.pose
+        publish_odometry(adjustedOdometry(raw))
     end)
 end

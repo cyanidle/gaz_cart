@@ -19,12 +19,16 @@ local socket   = require "socket"
 ---@field direct_voltage fun(wheel: string?, volts: number) open-loop voltage, V
 ---@field odo_period_ms integer? odometry integration period (default 20)
 ---@field telem_period_ms integer? telemetry stream period (default 100)
+---@field wheel_speed_stddev number? per-wheel speed 1-sigma uncertainty, m/s
 
 ---Wire the odometry/tuning node.
 ---@param cfg OdoConfig
 ---@return table odo the live Odometry integrator (:pose(), :velocity())
 return function(cfg)
-    local odo = Odometry.new { trackWidth = cfg.track_width }
+    local odo = Odometry.new {
+        trackWidth = cfg.track_width,
+        wheelSpeedStdDev = cfg.wheel_speed_stddev,
+    }
 
     local last_t
     each(cfg.odo_period_ms or 20, function()
@@ -32,7 +36,7 @@ return function(cfg)
         local dt  = last_t and (now - last_t) or 0.0
         last_t = now
         local w = cfg.wheels()
-        odo:update(w.fl.act, w.fr.act, w.rl.act, w.rr.act, dt)
+        odo:update(w.fl.act, w.fr.act, w.rl.act, w.rr.act, dt, now)
     end)
 
     pipe(cfg.model, function(msg)

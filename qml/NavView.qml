@@ -87,6 +87,7 @@ Item {
     Item {
         anchors.fill: parent
         anchors.margins: 8
+        anchors.rightMargin: 20
 
         Canvas {
             id: canvas

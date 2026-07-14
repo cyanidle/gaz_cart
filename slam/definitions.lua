@@ -86,6 +86,27 @@
 ---@field mapper SlamMapperConfig?
 ---@field solver SlamSolverConfig?
 ---@field throttle_scans integer? process every Nth lidar scan (default 1)
+---@field max_odometry_extrapolation number? maximum constant-twist projection to a scan timestamp, seconds (default 0.2)
+
+---@class SlamPoseCovariance
+---@field xx number
+---@field xy number
+---@field xtheta number
+---@field yy number
+---@field ytheta number
+---@field thetatheta number
+
+---@class SlamTwistCovariance
+---@field linear number
+---@field linear_angular number
+---@field angular number
+
+---@class SlamOdometry
+---@field timestamp number Unix time in seconds
+---@field pose NavPose
+---@field twist {linear: number, angular: number} body-frame m/s and rad/s
+---@field pose_covariance SlamPoseCovariance
+---@field twist_covariance SlamTwistCovariance
 
 ---@class SlamStats
 ---@field received_scans integer
@@ -99,9 +120,10 @@
 ---@field Save fun(self: Slam, base_path: string): boolean writes `.posegraph` and `.data`
 
 ---Online Karto/Ceres SLAM worker.
----Input: `odometry` (NavPose), `scan` (the Lidar worker's LaserScan-shaped
+---Input: `odometry` (SlamOdometry; legacy NavPose is accepted), `scan` (the Lidar worker's LaserScan-shaped
 ---payload), `pause` (bool), and `reset` (any non-nil).
----Output: `position` (map-corrected pose), `map` (origin-aware, dynamically
+---Output: `odometry` (complete map-corrected state), `position` (legacy alias
+---of odometry.pose), `map` (origin-aware, dynamically
 ---bounded GAMP occupancy bytes; 0 free, 100 occupied, 255 unknown),
 ---`scan` (corrected world-frame hit points), `covariance`, and `slam` stats.
 ---@param cfg SlamConfig

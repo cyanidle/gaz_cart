@@ -28,14 +28,24 @@ the Lua configuration. The accepted values are:
 - `dogleg_type`: `TRADITIONAL_DOGLEG` or `SUBSPACE_DOGLEG`;
 - `loss_function`: `None`, `HuberLoss`, or `CauchyLoss`.
 
-The `Slam` worker accepts odometry poses plus the LaserScan-shaped `scan`
-message emitted by `gaz_nav`'s `Lidar`. It emits:
+The `Slam` worker accepts timestamped 2D odometry plus the LaserScan-shaped
+`scan` message emitted by `gaz_nav`'s `Lidar`. Odometry contains `pose`, body
+`twist`, `pose_covariance`, and `twist_covariance`; legacy `{x,y,theta}` input
+is still accepted. SLAM uses the twist to project odometry to each scan's
+timestamp (bounded by `max_odometry_extrapolation`) instead of using a stale
+latest-position sample. It emits:
 
-- `position`: the Karto-corrected robot pose;
+- `odometry`: the complete state with its pose corrected into the map frame;
+- `position`: a compatibility alias for `odometry.pose`;
 - `map`: a dynamically bounded occupancy grid in the nav stack's `GAMP` byte
   format;
 - `scan`: accepted scan endpoints in the corrected world frame;
 - `covariance` and `slam`: scan-matcher diagnostics.
+
+The covariance inside emitted `odometry` is the wheel-odometry covariance,
+propagated to the scan timestamp and rotated into the map frame. The top-level
+`covariance` remains Karto's independent scan-match covariance; the two are not
+silently fused.
 
 `nodes/nav.lua` connects this output to `CostmapServer`, both planners, and the
 GUI. `Slam:Save("path/base")` writes `path/base.posegraph` and

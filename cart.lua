@@ -29,6 +29,8 @@ local MAX_LIN_SPD  = 1       -- m/s at full forward command (v = 1.0)
 local MAX_ROT_SPD  = 2       -- rad/s at full turn command (omega = 1.0)
 local SIM_START_X  = 0.5     -- initial sim robot x, m
 local SIM_START_Y  = 0.5     -- initial sim robot y, m
+local REAL_WHEEL_SPEED_STDDEV = 0.05 -- measured wheel-speed 1-sigma noise, m/s
+local SIM_WHEEL_SPEED_STDDEV  = 0.0  -- deterministic mocked encoders
 
 -- Wheel module node ids (set by each module's DIP switches).  Keys are the
 -- wheel names used throughout the script; values are Cyphal node ids.
@@ -103,8 +105,11 @@ end
 --  In sim mode the twist is integrated into a local Odometry instance
 --  (mocked motors); in real mode it is published to Cyphal.
 local sim_last_t = socket.gettime()
-local sim_odo = Odometry.new { trackWidth = TRACK_WIDTH }
-sim_odo:reset { x = SIM_START_X, y = SIM_START_Y, theta = 0 }
+local sim_odo = Odometry.new {
+    trackWidth = TRACK_WIDTH,
+    wheelSpeedStdDev = SIM_WHEEL_SPEED_STDDEV,
+}
+sim_odo:reset { x = SIM_START_X, y = SIM_START_Y, theta = 0, timestamp = sim_last_t }
 
 local drive
 if SIM then
@@ -120,7 +125,7 @@ if SIM then
         local dt = now - sim_last_t
         sim_last_t = now
         if dt > 0.5 then dt = 0.05 end
-        sim_odo:update(vL, vR, vL, vR, dt)
+        sim_odo:update(vL, vR, vL, vR, dt, now)
     end
 else
     drive = function(v, omega)
@@ -235,6 +240,7 @@ local odo = require "nodes.odo" {
     direct_voltage = direct_voltage,
     odo_period_ms = ODO_PERIOD_MS,
     telem_period_ms = TELEM_PERIOD_MS,
+    wheel_speed_stddev = REAL_WHEEL_SPEED_STDDEV,
 }
 
 -- SIM-aware pose: returns simulated (mocked-motor) pose or real odometry.
@@ -246,11 +252,22 @@ local function pose()
     end
 end
 
+-- Full timestamped odometry is the localization/navigation state source.
+-- pose() remains available for callers that only need the legacy tuple.
+local function odometry()
+    if SIM then
+        return sim_odo:odometry()
+    else
+        return odo:odometry()
+    end
+end
+
 require "nodes.nav" {
     model = branch(ws, "nav"),
     sim   = SIM,
     drive = drive,
     pose  = pose,
+    odometry = odometry,
 }
 
 -- Keyboard teleop from the GUI. Shares drive() with the nav planner — only

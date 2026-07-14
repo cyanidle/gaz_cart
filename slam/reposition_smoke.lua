@@ -3,6 +3,7 @@
 --   build/bin/radapter slam/reposition_smoke.lua
 
 local os = require "os"
+local socket = require "socket"
 package.path = SCRIPT_DIR .. "/../?.lua;" .. package.path
 
 local model = create_worker(function(self, msg, sender)
@@ -43,7 +44,18 @@ require "nodes.nav" {
     model = model,
     sim = true,
     drive = function() end,
-    pose = function() return raw_x, 0.5, 0.0 end,
+    odometry = function()
+        return {
+            timestamp = socket.gettime(),
+            pose = { x = raw_x, y = 0.5, theta = 0.0 },
+            twist = { linear = 0.0, angular = 0.0 },
+            pose_covariance = {
+                xx = 0.01, xy = 0, xtheta = 0,
+                yy = 0.01, ytheta = 0, thetatheta = 0.01,
+            },
+            twist_covariance = { linear = 0.001, linear_angular = 0, angular = 0.001 },
+        }
+    end,
 }
 
 after(400, function()

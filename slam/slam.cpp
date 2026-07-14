@@ -181,6 +181,9 @@ struct SlamConfig : WorkerConfig {
     WithDefault<MapperConfig> mapper{};
     WithDefault<SolverConfig> solver{};
     WithDefault<int> throttle_scans = 1;
+    // Bound constant-twist projection when a scan and odometry sample do not
+    // have exactly the same timestamp. This replaces the old latest-pose hold.
+    WithDefault<double> max_odometry_extrapolation = 0.20;
 };
 RAD_DESCRIBE(SlamConfig) {
     PARENT(WorkerConfig);
@@ -189,6 +192,7 @@ RAD_DESCRIBE(SlamConfig) {
     RAD_MEMBER(mapper);
     RAD_MEMBER(solver);
     RAD_MEMBER(throttle_scans);
+    RAD_MEMBER(max_odometry_extrapolation);
 }
 
 struct ScanData {
@@ -224,6 +228,53 @@ static QVariantMap toVariant(karto::Pose2 const& p) {
     return {{"x", p.GetX()}, {"y", p.GetY()}, {"theta", p.GetHeading()}};
 }
 
+struct PoseCovariance {
+    double xx = 0, xy = 0, xt = 0, yy = 0, yt = 0, tt = 0;
+};
+
+struct TwistCovariance {
+    double vv = 0, vw = 0, ww = 0;
+};
+
+struct OdometryState {
+    nav::Position pose;
+    double linear = 0;
+    double angular = 0;
+    double timestamp = 0;
+    PoseCovariance poseCovariance;
+    TwistCovariance twistCovariance;
+    bool hasTwist = false;
+};
+
+static double scalar(QVariant const& value, QString const& component = {}) {
+    if (value.metaType().id() == QMetaType::QVariantMap) {
+        return value.toMap().value(component).toDouble();
+    }
+    return value.toDouble();
+}
+
+static PoseCovariance parsePoseCovariance(QVariant const& value) {
+    const auto m = value.toMap();
+    return {m.value("xx").toDouble(), m.value("xy").toDouble(),
+            m.value("xtheta").toDouble(), m.value("yy").toDouble(),
+            m.value("ytheta").toDouble(), m.value("thetatheta").toDouble()};
+}
+
+static TwistCovariance parseTwistCovariance(QVariant const& value) {
+    const auto m = value.toMap();
+    return {m.value("linear").toDouble(), m.value("linear_angular").toDouble(),
+            m.value("angular").toDouble()};
+}
+
+static QVariantMap toVariant(PoseCovariance const& p) {
+    return {{"xx", p.xx}, {"xy", p.xy}, {"xtheta", p.xt},
+            {"yy", p.yy}, {"ytheta", p.yt}, {"thetatheta", p.tt}};
+}
+
+static QVariantMap toVariant(TwistCovariance const& p) {
+    return {{"linear", p.vv}, {"linear_angular", p.vw}, {"angular", p.ww}};
+}
+
 class Slam final : public Worker {
     SlamConfig config;
 
@@ -235,7 +286,7 @@ class Slam final : public Worker {
     karto::LaserRangeFinder* laser = nullptr;
 
     nav::Grid outputMap;
-    nav::Position odometry;
+    OdometryState odometry;
     karto::Pose2 mapToOdom;
     bool hasOdometry = false;
     bool hasCorrection = false;
@@ -289,7 +340,7 @@ public:
         auto odo = map.value("odometry");
         if (odo.isNull()) odo = map.value("position");
         if (!odo.isNull()) {
-            odometry = ParseAs<nav::Position>(odo);
+            odometry = parseOdometry(odo);
             hasOdometry = true;
             publishPoseOnly();
         }
@@ -307,12 +358,110 @@ private:
     MapperConfig const& mapperConf() const { return config.mapper.value; }
     SolverConfig const& solverConf() const { return config.solver.value; }
 
+    OdometryState parseOdometry(QVariant const& value) const {
+        const auto m = value.toMap();
+        auto pose = m.value("pose");
+        if (pose.isNull()) pose = m.value("position");
+        // Backward compatibility: odometry={x,y,theta} and position={...}.
+        if (pose.isNull()) pose = value;
+
+        OdometryState state;
+        state.pose = ParseAs<nav::Position>(pose);
+        state.timestamp = m.value("timestamp").toDouble();
+        if (!std::isfinite(state.timestamp) || state.timestamp <= 0) {
+            state.timestamp = QDateTime::currentMSecsSinceEpoch() / 1000.0;
+        }
+
+        const auto twist = m.value("twist").toMap();
+        auto linear = twist.value("linear");
+        if (linear.isNull()) linear = twist.value("v");
+        auto angular = twist.value("angular");
+        if (angular.isNull()) angular = twist.value("omega");
+        if (!linear.isNull() || !angular.isNull()) {
+            state.linear = scalar(linear, "x");
+            state.angular = scalar(angular, "z");
+            state.hasTwist = std::isfinite(state.linear) && std::isfinite(state.angular);
+            if (!state.hasTwist) Raise("Slam: odometry twist must be finite");
+        }
+        state.poseCovariance = parsePoseCovariance(m.value("pose_covariance"));
+        state.twistCovariance = parseTwistCovariance(m.value("twist_covariance"));
+        return state;
+    }
+
+    static void propagate(OdometryState& state, double dt) {
+        const double dTheta = state.angular * dt;
+        const double dFwd = state.linear * dt;
+        const double mid = state.pose.theta.value + dTheta * 0.5;
+        const double c = std::cos(mid), s = std::sin(mid);
+        const double fxTheta = -dFwd * s, fyTheta = dFwd * c;
+        const double gxV = dt * c, gyV = dt * s;
+        const double gxW = -dFwd * s * dt * 0.5;
+        const double gyW = dFwd * c * dt * 0.5;
+        const auto p = state.poseCovariance;
+        const auto q = state.twistCovariance;
+
+        PoseCovariance next;
+        next.xx = p.xx + 2 * fxTheta * p.xt + fxTheta * fxTheta * p.tt
+            + gxV * gxV * q.vv + 2 * gxV * gxW * q.vw + gxW * gxW * q.ww;
+        next.xy = p.xy + fxTheta * p.yt + fyTheta * p.xt + fxTheta * fyTheta * p.tt
+            + gxV * gyV * q.vv + (gxV * gyW + gxW * gyV) * q.vw + gxW * gyW * q.ww;
+        next.xt = p.xt + fxTheta * p.tt + gxV * dt * q.vw + gxW * dt * q.ww;
+        next.yy = p.yy + 2 * fyTheta * p.yt + fyTheta * fyTheta * p.tt
+            + gyV * gyV * q.vv + 2 * gyV * gyW * q.vw + gyW * gyW * q.ww;
+        next.yt = p.yt + fyTheta * p.tt + gyV * dt * q.vw + gyW * dt * q.ww;
+        next.tt = p.tt + dt * dt * q.ww;
+
+        state.pose.x += dFwd * c;
+        state.pose.y += dFwd * s;
+        state.pose.theta = nav::normalizedTheta(state.pose.theta.value + dTheta);
+        state.poseCovariance = next;
+        state.timestamp += dt;
+    }
+
+    OdometryState odometryAt(double timestamp) const {
+        auto state = odometry;
+        if (!state.hasTwist || !std::isfinite(timestamp) || timestamp <= 0) return state;
+        auto dt = timestamp - state.timestamp;
+        const auto limit = config.max_odometry_extrapolation.value;
+        dt = std::clamp(dt, -limit, limit);
+        propagate(state, dt);
+        return state;
+    }
+
+    PoseCovariance correctedCovariance(PoseCovariance const& p) const {
+        if (!hasCorrection) return p;
+        const double c = std::cos(mapToOdom.GetHeading());
+        const double s = std::sin(mapToOdom.GetHeading());
+        return {
+            c*c*p.xx - 2*c*s*p.xy + s*s*p.yy,
+            c*s*p.xx + (c*c-s*s)*p.xy - c*s*p.yy,
+            c*p.xt - s*p.yt,
+            s*s*p.xx + 2*c*s*p.xy + c*c*p.yy,
+            s*p.xt + c*p.yt,
+            p.tt,
+        };
+    }
+
+    QVariantMap correctedOdometry(OdometryState const& state,
+                                   karto::Pose2 const& corrected) const {
+        return {
+            {"timestamp", state.timestamp},
+            {"pose", toVariant(corrected)},
+            {"twist", QVariantMap{{"linear", state.linear}, {"angular", state.angular}}},
+            {"pose_covariance", toVariant(correctedCovariance(state.poseCovariance))},
+            {"twist_covariance", toVariant(state.twistCovariance)},
+        };
+    }
+
     void apply(SlamConfig conf) {
         config = std::move(conf);
         if (mapConf().resolution.value <= 0 || mapConf().update_interval_ms.value <= 0) {
             Raise("Slam: map resolution and update_interval_ms must be > 0");
         }
         if (config.throttle_scans.value <= 0) Raise("Slam: throttle_scans must be > 0");
+        if (config.max_odometry_extrapolation.value < 0) {
+            Raise("Slam: max_odometry_extrapolation must be >= 0");
+        }
         initialize();
         mapTimer->start(mapConf().update_interval_ms);
         Info("slam: Karto/Ceres dynamic map @ {} m, loop closing {}",
@@ -439,9 +588,13 @@ private:
     }
 
     void processScan(QVariantMap const& msg) {
+        auto scan = parseScan(msg);
         if (!hasOdometry) {
-            if (auto pose = msg.value("pose"); !pose.isNull()) {
-                odometry = ParseAs<nav::Position>(pose);
+            auto fallback = msg.value("odometry");
+            if (fallback.isNull()) fallback = msg.value("pose");
+            if (!fallback.isNull()) {
+                odometry = parseOdometry(fallback);
+                if (!msg.contains("odometry")) odometry.timestamp = scan.timestamp;
                 hasOdometry = true;
             } else {
                 Warn("slam: scan ignored until odometry is available");
@@ -449,13 +602,16 @@ private:
             }
         }
 
-        auto scan = parseScan(msg);
         ++receivedScans;
         if (receivedScans % config.throttle_scans.value != 0) return;
         if (!laser) createLaser(scan); else validateLaser(scan);
 
         auto* rangeScan = new karto::LocalizedRangeScan(laser->GetName(), scan.ranges);
-        const auto odomPose = toKarto(odometry);
+        // Align the odometric prior with this scan instead of holding the last
+        // asynchronous pose sample. Constant-twist projection is bounded by
+        // max_odometry_extrapolation.
+        const auto scanOdometry = odometryAt(scan.timestamp);
+        const auto odomPose = toKarto(scanOdometry.pose);
         rangeScan->SetOdometricPose(odomPose);
         rangeScan->SetCorrectedPose(hasCorrection ? compose(mapToOdom, odomPose) : odomPose);
         rangeScan->SetTime(scan.timestamp);
@@ -490,20 +646,26 @@ private:
         covarianceMsg["theta"] = covariance(2, 2);
         emit SendMsg(QVariantMap{
             {"position", toVariant(corrected)},
+            {"odometry", correctedOdometry(scanOdometry, corrected)},
             {"covariance", covarianceMsg},
             {"scan", correctedScan(rangeScan)},
             {"slam", stats()},
         });
     }
 
-    karto::Pose2 correctedPose() const {
-        const auto odom = toKarto(odometry);
+    karto::Pose2 correctedPose(OdometryState const& state) const {
+        const auto odom = toKarto(state.pose);
         return hasCorrection ? compose(mapToOdom, odom) : odom;
     }
 
     void publishPoseOnly() {
         if (!hasOdometry) return;
-        emit SendMsg(QVariantMap{{"position", toVariant(correctedPose())}, {"slam", stats()}});
+        const auto corrected = correctedPose(odometry);
+        emit SendMsg(QVariantMap{
+            {"position", toVariant(corrected)},
+            {"odometry", correctedOdometry(odometry, corrected)},
+            {"slam", stats()},
+        });
     }
 
     QVariantMap correctedScan(karto::LocalizedRangeScan* scan) const {
@@ -552,7 +714,11 @@ private:
         }
         mapDirty = false;
         QVariantMap msg{{"map", outputMap.bytes()}, {"slam", stats()}};
-        if (hasOdometry) msg["position"] = toVariant(correctedPose());
+        if (hasOdometry) {
+            const auto corrected = correctedPose(odometry);
+            msg["position"] = toVariant(corrected);
+            msg["odometry"] = correctedOdometry(odometry, corrected);
+        }
         emit SendMsg(msg);
     }
 };
