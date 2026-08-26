@@ -1,0 +1,7 @@
+# Keep the docker build context small: no local build trees, no firmware.
+build/
+out/
+.cache/
+.git/
+SixStep/
+**Dockerfile*

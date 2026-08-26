@@ -1,0 +1,84 @@
+# syntax=docker/dockerfile:1
+# gaz_cart cross-compilation — gaz_nav plugin .deb (aarch64), mirroring
+# radapter/scripts/Dockerfile.cross.
+#
+# Requires QEMU binfmt for the arm64 sysroot stage (same as radapter's):
+#   docker run --privileged --rm tonistiigi/binfmt --install arm64
+#
+# Extract the .deb:
+#   docker buildx build -f scripts/Dockerfile.cross --target pkg --output=out .
+#   ls out/gaz-nav_*.deb
+
+ARG TARGET_PLATFORM=arm64
+
+# ═══════════════════════════════════════════════════════════════════════
+# Stage: sysroot — target-arch Qt6 dev stack (what radapter-sdk's public
+# interface + gaz_nav need: Core/Network/WebSockets/SerialPort/SerialBus/Sql
+# come from radapter-qt, Gui from gaz_nav itself)
+# ═══════════════════════════════════════════════════════════════════════
+FROM --platform=${TARGET_PLATFORM} debian:bookworm-slim AS sysroot
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt update && apt install -y \
+        qt6-base-dev \
+        qt6-websockets-dev qt6-serialbus-dev qt6-serialport-dev \
+        libgl1-mesa-dev libxkbcommon-dev \
+        libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# ═══════════════════════════════════════════════════════════════════════
+# Stage: builder — host cross-toolchain + host Qt6 codegen tools + sysroot
+# ═══════════════════════════════════════════════════════════════════════
+FROM debian:bookworm-slim AS builder
+ARG TARGET_PLATFORM
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt update && apt install -y \
+        git cmake ninja-build build-essential file \
+        gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+        qt6-base-dev qt6-base-dev-tools \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=sysroot /lib /sysroot/lib
+COPY --from=sysroot /usr/lib /sysroot/usr/lib
+COPY --from=sysroot /usr/bin /sysroot/usr/bin
+COPY --from=sysroot /usr/include /sysroot/usr/include
+
+# Qt6 tool fixup: copy host codegen tools (moc/rcc/...) into the sysroot
+RUN case "${TARGET_PLATFORM}" in \
+    'arm64') \
+        mkdir -p /sysroot/usr/lib/qt6/libexec; \
+        cp -RLf /usr/lib/qt6/libexec/* /sysroot/usr/lib/qt6/libexec/; \
+        mkdir -p /sysroot/usr/lib/qt6/bin; \
+        cp -RLf /usr/lib/qt6/bin/* /sysroot/usr/lib/qt6/bin/ 2>/dev/null || true; \
+        ;; \
+    *) ;; \
+    esac
+
+# Reuse the submodule's toolchain file — same sysroot layout as radapter's
+COPY radapter/scripts/cmake/toolchain_arm64.cmake /opt/radapter/cmake/
+COPY . /src
+WORKDIR /src
+ENV CPM_SOURCE_CACHE=/cpm
+
+# ═══════════════════════════════════════════════════════════════════════
+# Stage: nav-builder — SDK-only radapter + gaz_nav, then cpack
+# ═══════════════════════════════════════════════════════════════════════
+FROM builder AS nav-builder
+RUN --mount=type=cache,target=/cpm \
+    cmake \
+        -D CMAKE_BUILD_TYPE=Release \
+        -D CMAKE_TOOLCHAIN_FILE=/opt/radapter/cmake/toolchain_arm64.cmake \
+        -D CMAKE_INSTALL_PREFIX=/usr \
+        -D RADAPTER_SDK_ONLY=ON \
+        -D RADAPTER_GUI=OFF \
+        -D RADAPTER_STATIC=OFF \
+        -D GAZ_BUILD_FRAMES=OFF \
+        -D GAZ_BUILD_SLAM=OFF \
+        -G Ninja -B /build \
+    && cmake --build /build --target gaz_nav -j$(nproc)
+WORKDIR /build
+RUN cpack -G DEB
+
+# ═══════════════════════════════════════════════════════════════════════
+# Stage: pkg
+# ═══════════════════════════════════════════════════════════════════════
+FROM scratch AS pkg
+COPY --from=nav-builder /build/gaz-nav_*.deb /

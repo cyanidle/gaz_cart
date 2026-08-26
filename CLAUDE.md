@@ -35,6 +35,19 @@ When working with the driver code, build with **`ninja -C build`** run from the
 `SixStep/` subdirectory. The toolchain (`arm-none-eabi-gcc`) and the configured
 `build/` directory are already present.
 
+## Packaging the nav plugin
+
+`scripts/Dockerfile.cross` cross-builds the `gaz_nav` radapter plugin for
+aarch64 (mirroring `radapter/scripts/Dockerfile.cross`) and packages it as a
+DEB via `cmake/Packaging.cmake`:
+
+    docker buildx build -f scripts/Dockerfile.cross --target pkg --output=out .
+
+The package installs `libgaz_nav.so` to `/usr/lib/radapter/plugins`; point
+`NAV_PLUGINS.nav` in `cart.lua` at that path on a deployed cart. The top-level
+`GAZ_BUILD_FRAMES` / `GAZ_BUILD_NAV` / `GAZ_BUILD_SLAM` options select which
+plugins are built.
+
 ## Cyphal ports
 
 Each module derives its ports from its (DIP-switch) node id:
