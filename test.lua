@@ -5,14 +5,14 @@ local PORT = {
     config       = 4100,  -- Pi -> module, { id, num, den }
 }
 
-local NODE = 4
+local NODE = 103
 
 local motor = Cyphal {
     can = CAN {
         plugin = "socketcan",
         device = "can0"
     },
-    node_id = 103,
+    node_id = NODE,
     publish = {
         cmd_1 = { type = "uavcan.primitive.scalar.Real32.1.0", port = PORT.direct_cmd  + 1 },
         cmd_2 = { type = "uavcan.primitive.scalar.Real32.1.0", port = PORT.direct_cmd  + 2 },
@@ -30,20 +30,9 @@ motor {
     cmd_4 = {value = 0},
 }
 
-local scale = 5
+local scale = 3
 
-each(1000, function ()
-    local val
-    if dir == 0 then
-        val = scale
-        dir = 1
-    elseif dir == 1 then
-        val = -scale
-        dir = -1
-    elseif dir == -1 then
-        val = 0
-        dir = 0
-    end
+local function send(val)
     motor {
         ["cmd_"..1] = {
             value = val
@@ -58,15 +47,26 @@ each(1000, function ()
             value = val
         }
     }
-    -- for i = 1, 4 do
-    --     motor {
-    --         ["cmd_"..i] = {
-    --             value = val
-    --         },
-    --     }
-    -- end
+end
+
+each(1000, function ()
+    local val
+    if dir == 0 then
+        val = scale
+        dir = 1
+    elseif dir == 1 then
+        val = -scale
+        dir = -1
+    elseif dir == -1 then
+        val = 0
+        dir = 0
+    end
+    send(val)
 end)
 
+on_shutdown(function ()
+    send(0)
+end)
 
 pipe(motor, function (msg)
     log(msg)

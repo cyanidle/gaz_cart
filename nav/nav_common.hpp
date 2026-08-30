@@ -26,14 +26,22 @@ struct Coord {
 
     friend bool operator==(Coord a, Coord b) noexcept { return a.x == b.x && a.y == b.y; }
     friend bool operator!=(Coord a, Coord b) noexcept { return !(a == b); }
+    friend bool operator<(Coord a, Coord b) noexcept { return std::tie(a.x, a.y) < std::tie(b.x, b.y); }
 };
 
-struct CoordHash {
-    size_t operator()(Coord c) const noexcept {
+inline std::size_t hash_value(Coord c) noexcept {
+    return std::hash<qulonglong>{}(qulonglong(quint32(c.x)) << 32 | quint32(c.y));
+}
+
+}
+
+template<> struct std::hash<nav::Coord> {
+    size_t operator()(nav::Coord c) const noexcept {
         return std::hash<qulonglong>{}(qulonglong(quint32(c.x)) << 32 | quint32(c.y));
     }
 };
 
+namespace nav {
 struct Vec2 {
     double x = 0;
     double y = 0;

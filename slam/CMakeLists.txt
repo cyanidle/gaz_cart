@@ -41,3 +41,13 @@ create_radapter_plugin(gaz_slam
 )
 target_include_directories(gaz_slam PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(gaz_slam PRIVATE gaz_karto)
+
+set_target_properties(gaz_slam PROPERTIES
+    BUILD_RPATH   "$ORIGIN/../bin"
+    INSTALL_RPATH "$ORIGIN/.."
+)
+
+install(TARGETS gaz_slam
+    LIBRARY DESTINATION lib/radapter/plugins
+    COMPONENT gaz_slam
+)

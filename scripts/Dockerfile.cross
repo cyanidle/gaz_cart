@@ -24,6 +24,13 @@ RUN apt update && apt install -y \
         libgl1-mesa-dev libxkbcommon-dev \
         libssl-dev \
     && rm -rf /var/lib/apt/lists/*
+RUN apt update
+RUN apt install -y libboost-container-dev libboost-serialization-dev
+RUN apt install -y libtbb-dev libceres-dev libeigen3-dev
+RUN apt install -y libblas-dev libsuitesparse-dev liblapack-dev
+# Debian's Ceres was built against ATLAS; its CeresTargets.cmake hard-codes
+# libatlas/libf77blas paths, so the dev symlinks must exist.
+RUN apt install -y libatlas-base-dev
 
 # ═══════════════════════════════════════════════════════════════════════
 # Stage: builder — host cross-toolchain + host Qt6 codegen tools + sysroot
@@ -36,10 +43,25 @@ RUN apt update && apt install -y \
         gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
         qt6-base-dev qt6-base-dev-tools \
     && rm -rf /var/lib/apt/lists/*
+RUN apt update && apt install -y libboost-all-dev
 COPY --from=sysroot /lib /sysroot/lib
 COPY --from=sysroot /usr/lib /sysroot/usr/lib
 COPY --from=sysroot /usr/bin /sysroot/usr/bin
 COPY --from=sysroot /usr/include /sysroot/usr/include
+# Eigen3 ships its CMake config under /usr/share — needed by find_package in
+# the sysroot-restricted cross build.
+COPY --from=sysroot /usr/share /sysroot/usr/share
+
+# Debian Ceres records /usr/lib/aarch64-linux-gnu/lib{lapack,blas,f77blas,atlas}.so
+# in its link interface. CMake uses those absolute paths verbatim (no sysroot
+# re-rooting for imported-target paths), and the host has no such directory —
+# so create it and point the names at the real libs in the sysroot (lapack/blas
+# are ATLAS alternatives symlinks into /etc, which isn't copied).
+RUN mkdir -p /usr/lib/aarch64-linux-gnu && \
+    ln -sf /sysroot/usr/lib/aarch64-linux-gnu/atlas/liblapack.so  /usr/lib/aarch64-linux-gnu/liblapack.so && \
+    ln -sf /sysroot/usr/lib/aarch64-linux-gnu/atlas/libblas.so    /usr/lib/aarch64-linux-gnu/libblas.so && \
+    ln -sf /sysroot/usr/lib/aarch64-linux-gnu/libf77blas.so       /usr/lib/aarch64-linux-gnu/libf77blas.so && \
+    ln -sf /sysroot/usr/lib/aarch64-linux-gnu/libatlas.so         /usr/lib/aarch64-linux-gnu/libatlas.so
 
 # Qt6 tool fixup: copy host codegen tools (moc/rcc/...) into the sysroot
 RUN case "${TARGET_PLATFORM}" in \
@@ -62,6 +84,8 @@ ENV CPM_SOURCE_CACHE=/cpm
 # Stage: nav-builder — SDK-only radapter + gaz_nav, then cpack
 # ═══════════════════════════════════════════════════════════════════════
 FROM builder AS nav-builder
+# Cross-compiling: FindBLAS/FindLAPACK's check_function_exists probes fail under
+# QEMU/cross, so point Ceres' SuiteSparse check at the sysroot libs directly.
 RUN --mount=type=cache,target=/cpm \
     cmake \
         -D CMAKE_BUILD_TYPE=Release \
@@ -70,10 +94,10 @@ RUN --mount=type=cache,target=/cpm \
         -D RADAPTER_SDK_ONLY=ON \
         -D RADAPTER_GUI=OFF \
         -D RADAPTER_STATIC=OFF \
-        -D GAZ_BUILD_FRAMES=OFF \
-        -D GAZ_BUILD_SLAM=OFF \
+        -D BLAS_LIBRARIES=/sysroot/usr/lib/aarch64-linux-gnu/atlas/libblas.so \
+        -D LAPACK_LIBRARIES=/sysroot/usr/lib/aarch64-linux-gnu/atlas/liblapack.so \
         -G Ninja -B /build \
-    && cmake --build /build --target gaz_nav -j$(nproc)
+    && cmake --build /build -j$(nproc)
 WORKDIR /build
 RUN cpack -G DEB
 
@@ -81,4 +105,4 @@ RUN cpack -G DEB
 # Stage: pkg
 # ═══════════════════════════════════════════════════════════════════════
 FROM scratch AS pkg
-COPY --from=nav-builder /build/gaz-nav_*.deb /
+COPY --from=nav-builder /build/gaz-*.deb /

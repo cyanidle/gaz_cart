@@ -24,7 +24,15 @@
 
 #include <QTimer>
 #include <algorithm>
+
+#if __has_include(<boost/unordered/unordered_flat_set.hpp>)
 #include <boost/unordered/unordered_flat_set.hpp>
+#define SET boost::unordered_flat_set
+#else
+#include <set>
+#define SET std::set
+#endif
+
 #include <vector>
 
 #include "radapter/radapter.hpp"
@@ -102,8 +110,8 @@ class GlobalPlanner final : public Worker {
     bool reached = false;
 
     std::vector<PlannerNode> graph;
-    boost::unordered_flat_set<quint32> open;
-    boost::unordered_flat_set<nav::Coord, nav::CoordHash> covered;
+    SET<quint32> open;
+    SET<nav::Coord> covered;
     int currentCount = 0;
     double timeSinceNewTarget = 0;
 
@@ -152,8 +160,8 @@ private:
             Raise("GlobalPlanner: outside_map_margin must be >= 0");
         }
         graph.reserve(size_t(config.nodes_batch_size.value));
-        open.reserve(size_t(config.nodes_batch_size.value));
-        covered.reserve(size_t(config.nodes_batch_size.value));
+        //open.reserve(size_t(config.nodes_batch_size.value));
+        //covered.reserve(size_t(config.nodes_batch_size.value));
         updateTimer->start(config.update_rate_ms);
     }
 
