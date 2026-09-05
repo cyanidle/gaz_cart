@@ -22,10 +22,9 @@ target_link_libraries(gaz_nav PRIVATE Qt6::Gui rplidar_sdk)
 
 set_target_properties(gaz_nav PROPERTIES
     BUILD_RPATH   "$ORIGIN/../bin"
-    INSTALL_RPATH "$ORIGIN/.."
+    INSTALL_RPATH "$ORIGIN/../.."
 )
 
 # Canonical location for .deb-installed radapter plugins (see cmake/Packaging.cmake).
-# Component-scoped so cpack packages only the plugin, not radapter's own
-# install rules (radapter-sdk lib + headers) that share this build tree.
+# Component-scoped to exclude unrelated development install rules.
 install(TARGETS gaz_nav LIBRARY DESTINATION lib/radapter/plugins COMPONENT gaz_nav)

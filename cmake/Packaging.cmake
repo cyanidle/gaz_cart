@@ -1,82 +1,109 @@
-# ============================================================================
-# CPack DEB packaging for the gaz_cart radapter plugins.
-# Included from the top-level CMakeLists — after all add_subdirectory() calls
-# so CPACK_* vars leaked by CPM deps are overridden here.
-#
-#   cmake --build build -j $(nproc)
-#   (cd build && cpack -G DEB)
-#
-# Installs the plugins into /usr/lib/radapter/plugins; reference them from
-# cart.lua, e.g. plugins = { nav = "/usr/lib/radapter/plugins/libgaz_nav" }.
-# ============================================================================
-
-if(NOT TARGET gaz_nav AND NOT TARGET gaz_frames AND NOT TARGET gaz_slam)
+# Component filtering excludes radapter/dependency headers and development files.
+# Keep this after all add_subdirectory calls to override dependency CPack settings.
+set(CPACK_COMPONENTS_ALL)
+foreach(plugin gaz_frames gaz_nav gaz_slam)
+    if(TARGET ${plugin})
+        list(APPEND CPACK_COMPONENTS_ALL ${plugin})
+    endif()
+endforeach()
+if(NOT CPACK_COMPONENTS_ALL)
     return()
 endif()
 
-set(CPACK_PACKAGE_VENDOR        "cyanidle")
-set(CPACK_PACKAGE_CONTACT       "lyosha.doronin@gmail.com")
-set(CPACK_PACKAGE_HOMEPAGE_URL  "https://github.com/cyanidle/gaz_cart")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Radapter plugins for the gaz_cart robot cart")
-set(CPACK_PACKAGE_DESCRIPTION   "Native radapter plugins for the gaz_cart differential-drive
-robot: transform frame support (gaz_frames), navigation stack (gaz_nav),
-and SLAM (gaz_slam).")
-
-# Package only the plugin components — radapter's own install rules in this
-# build tree belong to the radapter-headless/radapter-gui debs, not this one.
-# Component install is ON: monolithic DEB mode ignores CPACK_COMPONENTS_ALL
-# and would bundle radapter-sdk + headers into this package.
-set(CPACK_COMPONENTS_ALL             "gaz_nav;gaz_frames;gaz_slam")
-set(CPACK_DEB_COMPONENT_INSTALL      ON)
-if(NOT DEFINED CPACK_PACKAGE_VERSION)
-    set(CPACK_PACKAGE_VERSION    "0.1.0")
+if(GAZ_PACKAGE_RUNTIME)
+    if(NOT TARGET radapter OR NOT TARGET radapter-sdk)
+        message(FATAL_ERROR "GAZ_PACKAGE_RUNTIME requires the radapter executable and shared SDK")
+    endif()
+    set_target_properties(radapter PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")
+    install(TARGETS radapter radapter-sdk
+        RUNTIME DESTINATION bin COMPONENT gaz_cart_runtime
+        LIBRARY DESTINATION lib COMPONENT gaz_cart_runtime)
+    install(FILES cart.lua DESTINATION share/gaz-cart COMPONENT gaz_cart_runtime)
+    install(FILES
+        mods/config_defs.lua mods/odometry.lua mods/diff_drive.lua mods/rational.lua
+        DESTINATION share/gaz-cart/mods COMPONENT gaz_cart_runtime)
+    install(FILES nodes/odo.lua nodes/nav.lua nodes/teleop.lua nodes/ros.lua
+        DESTINATION share/gaz-cart/nodes COMPONENT gaz_cart_runtime)
+    install(PROGRAMS scripts/gaz-cart DESTINATION bin COMPONENT gaz_cart_runtime)
+    install(FILES tests/packaging/smoke.lua
+        DESTINATION share/gaz-cart COMPONENT gaz_cart_runtime
+        RENAME packaging-smoke.lua)
+    list(APPEND CPACK_COMPONENTS_ALL gaz_cart_runtime)
 endif()
-set(CPACK_GENERATOR              "DEB")
-set(CPACK_DEBIAN_FILE_NAME       DEB-DEFAULT)
-# Runtime deps are declared manually: shlibdeps breaks cross-builds where it
-# can't resolve target-arch libs (same reasoning as radapter's Packaging.cmake).
-set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
+
+set(CPACK_PACKAGE_NAME "gaz-cart")
+set(CPACK_DEBIAN_PACKAGE_NAME "gaz-cart")
+set(CPACK_PACKAGE_VERSION "${gaz_cart_VERSION}")
+set(CPACK_PACKAGE_FILE_NAME "gaz-cart-${gaz_cart_VERSION}-${CMAKE_SYSTEM_PROCESSOR}")
+set(CPACK_PACKAGE_VENDOR "cyanidle")
+set(CPACK_PACKAGE_CONTACT "lyosha.doronin@gmail.com")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/cyanidle/gaz_cart")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Headless control stack for the gaz_cart robot")
+set(CPACK_PACKAGE_DESCRIPTION "Radapter transform frames, navigation and SLAM plugins for the gaz_cart differential-drive robot. The unified package includes headless radapter and the Lua cart runtime. Launch manually with gaz-cart; installation never starts hardware control.")
+set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+set(CPACK_GENERATOR "DEB")
+set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "")
+set(CPACK_DEBIAN_PACKAGE_CONFLICTS "")
+set(CPACK_DEBIAN_PACKAGE_PROVIDES "")
 
-# Architecture mapping
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
-    set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64")
-    set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "arm64")
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "armv7")
-    set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "armhf")
+if(CMAKE_CROSSCOMPILING)
+    set(GAZ_DEB_CROSS_DISTRIBUTION "" CACHE STRING "Target distribution for cross DEBs (bookworm)")
+    if(NOT GAZ_DEB_CROSS_DISTRIBUTION STREQUAL "bookworm")
+        message(FATAL_ERROR "Cross DEB dependencies require GAZ_DEB_CROSS_DISTRIBUTION=bookworm and a matching sysroot")
+    endif()
+    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
+    set(gaz_deb_common "libc6 (>= 2.36), libstdc++6 (>= 12), libgcc-s1, libqt6core6")
+    set(gaz_deb_nav "libqt6gui6")
+    set(gaz_deb_slam "libboost-serialization1.74.0, libceres3, libgoogle-glog0v6, libtbb12")
+    set(gaz_deb_runtime "libqt6network6, libqt6serialport6, libqt6serialbus6, libqt6sql6, libqt6websockets6, libssl3")
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64")
+        set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE arm64)
+    else()
+        message(FATAL_ERROR "The supported cross DEB target is Bookworm arm64")
+    endif()
 else()
-    set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "${CMAKE_SYSTEM_PROCESSOR}")
+    # Native packaging requires Debian/Ubuntu and dpkg-dev. Discover ABI versions
+    # from the installed libraries, rather than imposing cross-sysroot versions.
+    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+    set(gaz_deb_common "")
+    set(gaz_deb_nav "")
+    set(gaz_deb_slam "")
+    set(gaz_deb_runtime "")
 endif()
 
-# Per-component package names and dependencies. These must be set before
-# include(CPack) so that CPack reads them when configuring the generators.
-set(CPACK_DEBIAN_GAZ_NAV_PACKAGE_NAME    "gaz-nav")
-set(CPACK_DEBIAN_GAZ_NAV_PACKAGE_DEPENDS
-    "radapter-headless | radapter-gui, libqt6core6, libqt6gui6")
-
-set(CPACK_DEBIAN_GAZ_FRAMES_PACKAGE_NAME "gaz-frames")
-set(CPACK_DEBIAN_GAZ_FRAMES_PACKAGE_DEPENDS
-    "radapter-headless | radapter-gui, libqt6core6")
-
-set(CPACK_DEBIAN_GAZ_SLAM_PACKAGE_NAME   "gaz-slam")
-set(CPACK_DEBIAN_GAZ_SLAM_PACKAGE_DEPENDS
-    "radapter-headless | radapter-gui, libqt6core6, libboost-serialization1.83.0, libceres4t64, libgoogle-glog0v6t64, libtbb12")
+if(GAZ_PACKAGE_RUNTIME)
+    set(CPACK_COMPONENTS_GROUPING ALL_COMPONENTS_IN_ONE)
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libqt6serialbus6-plugins")
+    foreach(deps gaz_deb_common gaz_deb_nav gaz_deb_slam gaz_deb_runtime)
+        if(${deps})
+            string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", ${${deps}}")
+        endif()
+    endforeach()
+    set(CPACK_DEBIAN_PACKAGE_CONFLICTS "radapter-headless, radapter-gui, gaz-frames, gaz-nav, gaz-slam")
+    set(CPACK_DEBIAN_PACKAGE_PROVIDES "radapter-headless")
+else()
+    set(CPACK_COMPONENTS_GROUPING IGNORE)
+    foreach(plugin IN LISTS CPACK_COMPONENTS_ALL)
+        string(TOUPPER "${plugin}" component)
+        string(REPLACE "_" "-" package "${plugin}")
+        set(CPACK_DEBIAN_${component}_PACKAGE_NAME "${package}")
+        set(CPACK_DEBIAN_${component}_PACKAGE_DEPENDS "radapter-headless | radapter-gui")
+        if(gaz_deb_common)
+            string(APPEND CPACK_DEBIAN_${component}_PACKAGE_DEPENDS ", ${gaz_deb_common}")
+        endif()
+        if(plugin STREQUAL "gaz_nav" AND gaz_deb_nav)
+            string(APPEND CPACK_DEBIAN_${component}_PACKAGE_DEPENDS ", ${gaz_deb_nav}")
+        elseif(plugin STREQUAL "gaz_slam" AND gaz_deb_slam)
+            string(APPEND CPACK_DEBIAN_${component}_PACKAGE_DEPENDS ", ${gaz_deb_slam}")
+        endif()
+    endforeach()
+endif()
 
 include(CPack)
-
-# Declaring the component (not just CPACK_COMPONENTS_ALL) is what makes CPack
-# actually do a component-filtered install.
-cpack_add_component(gaz_nav
-    DISPLAY_NAME "gaz_nav plugin"
-    DESCRIPTION "Radapter navigation plugin: costmap, planners, lidar"
-)
-cpack_add_component(gaz_frames
-    DISPLAY_NAME "gaz_frames plugin"
-    DESCRIPTION "Radapter transform frame support"
-)
-cpack_add_component(gaz_slam
-    DISPLAY_NAME "gaz_slam plugin"
-    DESCRIPTION "Radapter SLAM"
-)
+foreach(component IN LISTS CPACK_COMPONENTS_ALL)
+    cpack_add_component(${component})
+endforeach()

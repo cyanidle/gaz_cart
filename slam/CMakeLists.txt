@@ -44,7 +44,7 @@ target_link_libraries(gaz_slam PRIVATE gaz_karto)
 
 set_target_properties(gaz_slam PROPERTIES
     BUILD_RPATH   "$ORIGIN/../bin"
-    INSTALL_RPATH "$ORIGIN/.."
+    INSTALL_RPATH "$ORIGIN/../.."
 )
 
 install(TARGETS gaz_slam

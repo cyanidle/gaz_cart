@@ -13,7 +13,7 @@ create_radapter_plugin(gaz_frames
 
 set_target_properties(gaz_frames PROPERTIES
     BUILD_RPATH   "$ORIGIN/../bin"
-    INSTALL_RPATH "$ORIGIN/.."
+    INSTALL_RPATH "$ORIGIN/../.."
 )
 
 install(TARGETS gaz_frames

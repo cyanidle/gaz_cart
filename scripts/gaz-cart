@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/bin/radapter /usr/share/gaz-cart/cart.lua "$@"

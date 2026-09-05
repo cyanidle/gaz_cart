@@ -1,13 +1,12 @@
 # syntax=docker/dockerfile:1
-# gaz_cart cross-compilation — gaz_nav plugin .deb (aarch64), mirroring
-# radapter/scripts/Dockerfile.cross.
+# Unified gaz-cart DEB: headless radapter, all three plugins and Lua runtime.
 #
 # Requires QEMU binfmt for the arm64 sysroot stage (same as radapter's):
 #   docker run --privileged --rm tonistiigi/binfmt --install arm64
 #
 # Extract the .deb:
 #   docker buildx build -f scripts/Dockerfile.cross --target pkg --output=out .
-#   ls out/gaz-nav_*.deb
+#   ls out/gaz-cart_*.deb
 
 ARG TARGET_PLATFORM=arm64
 
@@ -81,9 +80,9 @@ WORKDIR /src
 ENV CPM_SOURCE_CACHE=/cpm
 
 # ═══════════════════════════════════════════════════════════════════════
-# Stage: nav-builder — SDK-only radapter + gaz_nav, then cpack
+# Stage: cart-builder — headless radapter + all plugins, then cpack
 # ═══════════════════════════════════════════════════════════════════════
-FROM builder AS nav-builder
+FROM builder AS cart-builder
 # Cross-compiling: FindBLAS/FindLAPACK's check_function_exists probes fail under
 # QEMU/cross, so point Ceres' SuiteSparse check at the sysroot libs directly.
 RUN --mount=type=cache,target=/cpm \
@@ -91,9 +90,17 @@ RUN --mount=type=cache,target=/cpm \
         -D CMAKE_BUILD_TYPE=Release \
         -D CMAKE_TOOLCHAIN_FILE=/opt/radapter/cmake/toolchain_arm64.cmake \
         -D CMAKE_INSTALL_PREFIX=/usr \
-        -D RADAPTER_SDK_ONLY=ON \
+        -D GAZ_PACKAGE_RUNTIME=ON \
+        -D GAZ_BUILD_FRAMES=ON \
+        -D GAZ_BUILD_NAV=ON \
+        -D GAZ_BUILD_SLAM=ON \
+        -D GAZ_DEB_CROSS_DISTRIBUTION=bookworm \
+        -D RADAPTER_SDK_ONLY=OFF \
         -D RADAPTER_GUI=OFF \
         -D RADAPTER_STATIC=OFF \
+        -D RADAPTER_JIT=OFF \
+        -D RADAPTER_JIT_STATIC=OFF \
+        -D RADAPTER_ROS2=OFF \
         -D BLAS_LIBRARIES=/sysroot/usr/lib/aarch64-linux-gnu/atlas/libblas.so \
         -D LAPACK_LIBRARIES=/sysroot/usr/lib/aarch64-linux-gnu/atlas/liblapack.so \
         -G Ninja -B /build \
@@ -105,4 +112,4 @@ RUN cpack -G DEB
 # Stage: pkg
 # ═══════════════════════════════════════════════════════════════════════
 FROM scratch AS pkg
-COPY --from=nav-builder /build/gaz-*.deb /
+COPY --from=cart-builder /build/gaz-cart_*.deb /
