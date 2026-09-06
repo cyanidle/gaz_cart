@@ -90,7 +90,7 @@ RUN --mount=type=cache,target=/cpm \
         -D CMAKE_BUILD_TYPE=Release \
         -D CMAKE_TOOLCHAIN_FILE=/opt/radapter/cmake/toolchain_arm64.cmake \
         -D CMAKE_INSTALL_PREFIX=/usr \
-        -D GAZ_PACKAGE_RUNTIME=ON \
+        -D GAZ_PACKAGE_TARGET=cart \
         -D GAZ_BUILD_FRAMES=ON \
         -D GAZ_BUILD_NAV=ON \
         -D GAZ_BUILD_SLAM=ON \

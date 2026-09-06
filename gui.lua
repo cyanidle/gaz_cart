@@ -21,7 +21,9 @@ local client = WebsocketClient { url = url, protocol = "msgpack" }
 -- (keyed by wheel + id), persist the set as JSON next to this script, and
 -- replay it on every (re)connection to the robot.
 
-local STATE_FILE = SCRIPT_DIR .. "/config.json"
+-- GAZ_GUI_STATE (set by the gaz-gui launcher) relocates the state file to a
+-- writable location; next to the script remains the development default.
+local STATE_FILE = os.getenv("GAZ_GUI_STATE") or SCRIPT_DIR .. "/config.json"
 
 local saved = {} -- ["<wheel>:<id>"] = { wheel = ..., id = ..., value = ... }
 do

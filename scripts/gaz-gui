@@ -1,0 +1,9 @@
+#!/bin/sh
+# gaz-gui — cart config/tuning GUI (controller PC). Connects to the cart's
+# websocket; pass its address, e.g.:
+#     gaz-gui ws://192.168.1.50:6080
+# Sent-config state is persisted under XDG_DATA_HOME (gui.lua's default
+# SCRIPT_DIR location is the read-only /usr/share install).
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/gaz-gui"
+mkdir -p "$DATA_DIR" || exit 1
+GAZ_GUI_STATE="$DATA_DIR/config.json" exec /usr/bin/radapter --gui /usr/share/gaz-gui/gui.lua "$@"
