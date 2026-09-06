@@ -59,8 +59,11 @@ arm64 execution. Do not change host binfmt registration without approval.
 without executing its build stages. Cross dependencies are explicitly selected
 with `GAZ_DEB_CROSS_DISTRIBUTION=bookworm`; do not reuse them for another distro.
 
-Native packaging requires Debian/Ubuntu, `dpkg-dev`, and the Qt6/Boost/Ceres/
-Eigen/TBB development packages. It uses `dpkg-shlibdeps` to derive dependencies
+Native packaging requires Debian/Ubuntu, `dpkg-dev`, and the Qt6/Ceres/Eigen/
+TBB development packages (boost serialization is built from source by CPM as
+a static PIC library embedded into the slam plugin, so no system boost and no
+versioned `libboost-serialization*` runtime dependency). It uses
+`dpkg-shlibdeps` to derive dependencies
 from the native binaries, not Bookworm package names. Non-Debian development
 builds remain supported, but native DEB creation is not supported there.
 

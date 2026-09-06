@@ -23,8 +23,7 @@ RUN apt update && apt install -y \
         libgl1-mesa-dev libxkbcommon-dev \
         libssl-dev \
     && rm -rf /var/lib/apt/lists/*
-RUN apt update
-RUN apt install -y libboost-container-dev libboost-serialization-dev
+# boost serialization is source-built (CPM, /cpm cache) as a static PIC lib.
 RUN apt install -y libtbb-dev libceres-dev libeigen3-dev
 RUN apt install -y libblas-dev libsuitesparse-dev liblapack-dev
 # Debian's Ceres was built against ATLAS; its CeresTargets.cmake hard-codes
@@ -42,7 +41,6 @@ RUN apt update && apt install -y \
         gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
         qt6-base-dev qt6-base-dev-tools \
     && rm -rf /var/lib/apt/lists/*
-RUN apt update && apt install -y libboost-all-dev
 COPY --from=sysroot /lib /sysroot/lib
 COPY --from=sysroot /usr/lib /sysroot/usr/lib
 COPY --from=sysroot /usr/bin /sysroot/usr/bin
