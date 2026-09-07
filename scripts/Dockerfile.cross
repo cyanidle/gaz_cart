@@ -17,18 +17,18 @@ ARG TARGET_PLATFORM=arm64
 # ═══════════════════════════════════════════════════════════════════════
 FROM --platform=${TARGET_PLATFORM} debian:bookworm-slim AS sysroot
 ENV DEBIAN_FRONTEND=noninteractive
+# boost serialization is source-built (CPM, /cpm cache) as a static PIC lib.
+# Debian's Ceres was built against ATLAS; its CeresTargets.cmake hard-codes
+# libatlas/libf77blas paths, so the dev symlinks must exist.
 RUN apt update && apt install -y \
         qt6-base-dev \
         qt6-websockets-dev qt6-serialbus-dev qt6-serialport-dev \
         libgl1-mesa-dev libxkbcommon-dev \
         libssl-dev \
+        libtbb-dev libceres-dev libeigen3-dev \
+        libblas-dev libsuitesparse-dev liblapack-dev \
+        libatlas-base-dev \
     && rm -rf /var/lib/apt/lists/*
-# boost serialization is source-built (CPM, /cpm cache) as a static PIC lib.
-RUN apt install -y libtbb-dev libceres-dev libeigen3-dev
-RUN apt install -y libblas-dev libsuitesparse-dev liblapack-dev
-# Debian's Ceres was built against ATLAS; its CeresTargets.cmake hard-codes
-# libatlas/libf77blas paths, so the dev symlinks must exist.
-RUN apt install -y libatlas-base-dev
 
 # ═══════════════════════════════════════════════════════════════════════
 # Stage: builder — host cross-toolchain + host Qt6 codegen tools + sysroot
