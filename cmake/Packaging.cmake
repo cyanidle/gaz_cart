@@ -10,24 +10,13 @@ endforeach()
 set(CPACK_COMPONENTS_ALL)
 
 if(GAZ_PACKAGE_TARGET STREQUAL "cart")
-    if(NOT TARGET radapter OR NOT TARGET radapter-sdk)
-        message(FATAL_ERROR "GAZ_PACKAGE_TARGET=cart requires the radapter executable and shared SDK")
+    if(NOT gaz_plugins)
+        message(FATAL_ERROR "GAZ_PACKAGE_TARGET=cart requires all three plugins")
     endif()
-    set_target_properties(radapter PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")
-    install(TARGETS radapter radapter-sdk
-        RUNTIME DESTINATION bin COMPONENT gaz_cart_runtime
-        LIBRARY DESTINATION lib COMPONENT gaz_cart_runtime)
-    install(FILES cart.lua DESTINATION share/gaz-cart COMPONENT gaz_cart_runtime)
-    install(FILES
-        mods/config_defs.lua mods/odometry.lua mods/diff_drive.lua mods/rational.lua
-        DESTINATION share/gaz-cart/mods COMPONENT gaz_cart_runtime)
-    install(FILES nodes/odo.lua nodes/nav.lua nodes/teleop.lua nodes/ros.lua
-        DESTINATION share/gaz-cart/nodes COMPONENT gaz_cart_runtime)
-    install(PROGRAMS scripts/gaz-cart DESTINATION bin COMPONENT gaz_cart_runtime)
-    install(FILES tests/packaging/smoke.lua
-        DESTINATION share/gaz-cart COMPONENT gaz_cart_runtime
-        RENAME packaging-smoke.lua)
-    set(CPACK_COMPONENTS_ALL ${gaz_plugins} gaz_cart_runtime)
+    # Native parts only: one merged plugin DEB. The engine ships as the separate
+    # radapter-headless DEB; the Lua runtime is deployed from the repository
+    # checkout, not from a package.
+    set(CPACK_COMPONENTS_ALL ${gaz_plugins})
 elseif(GAZ_PACKAGE_TARGET STREQUAL "gui")
     if(NOT TARGET radapter OR NOT TARGET radapter-sdk)
         message(FATAL_ERROR "GAZ_PACKAGE_TARGET=gui requires the radapter executable and shared SDK")
@@ -54,8 +43,8 @@ if(GAZ_PACKAGE_TARGET STREQUAL "gui")
     set(CPACK_PACKAGE_DESCRIPTION "GUI radapter plus the cart's QML tuning interface (gui.lua). Runs on the controller PC and connects to the cart's websocket. Launch manually with gaz-gui; installation never starts anything.")
 else()
     set(gaz_package_name "gaz-cart")
-    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Headless control stack for the gaz_cart robot")
-    set(CPACK_PACKAGE_DESCRIPTION "Radapter transform frames, navigation and SLAM plugins for the gaz_cart differential-drive robot. The unified package includes headless radapter and the Lua cart runtime. Launch manually with gaz-cart; installation never starts hardware control.")
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Native plugins for the gaz_cart robot cart")
+    set(CPACK_PACKAGE_DESCRIPTION "Radapter transform frames, navigation and SLAM plugins for the gaz_cart differential-drive robot, merged into one package. Depends on the radapter engine (radapter-headless); the Lua cart runtime is deployed from a repository checkout. Launch manually; installation never starts hardware control.")
 endif()
 set(CPACK_PACKAGE_NAME "${gaz_package_name}")
 set(CPACK_DEBIAN_PACKAGE_NAME "${gaz_package_name}")
@@ -74,11 +63,19 @@ set(CPACK_DEBIAN_PACKAGE_DEPENDS "")
 set(CPACK_DEBIAN_PACKAGE_CONFLICTS "")
 set(CPACK_DEBIAN_PACKAGE_PROVIDES "")
 
+set(GAZ_DEB_DISTRIBUTION "" CACHE STRING
+    "Pinned distribution for manual DEB dependencies (bookworm); required when cross-compiling, or for native builds inside a matching container")
 if(CMAKE_CROSSCOMPILING)
-    set(GAZ_DEB_CROSS_DISTRIBUTION "" CACHE STRING "Target distribution for cross DEBs (bookworm)")
-    if(NOT GAZ_DEB_CROSS_DISTRIBUTION STREQUAL "bookworm")
-        message(FATAL_ERROR "Cross DEB dependencies require GAZ_DEB_CROSS_DISTRIBUTION=bookworm and a matching sysroot")
+    if(NOT GAZ_DEB_DISTRIBUTION STREQUAL "bookworm")
+        message(FATAL_ERROR "Cross DEB dependencies require GAZ_DEB_DISTRIBUTION=bookworm and a matching sysroot")
     endif()
+    if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64")
+        message(FATAL_ERROR "The supported cross DEB target is Bookworm arm64")
+    endif()
+endif()
+
+if(GAZ_DEB_DISTRIBUTION STREQUAL "bookworm")
+    # Dependency names pinned to Debian Bookworm (cross sysroot or container).
     set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
     set(gaz_deb_common "libc6 (>= 2.36), libstdc++6 (>= 12), libgcc-s1, libqt6core6")
     set(gaz_deb_nav "libqt6gui6")
@@ -86,15 +83,16 @@ if(CMAKE_CROSSCOMPILING)
     set(gaz_deb_slam "libceres3, libgoogle-glog0v6, libtbb12")
     set(gaz_deb_runtime "libqt6network6, libqt6serialport6, libqt6serialbus6, libqt6sql6, libqt6websockets6, libssl3")
     set(gaz_deb_gui_cpp "libqt6gui6, libqt6qml6, libqt6quick6, libqt6widgets6")
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64")
+    if(CMAKE_CROSSCOMPILING)
         set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE arm64)
-    else()
-        message(FATAL_ERROR "The supported cross DEB target is Bookworm arm64")
     endif()
 else()
     # Native packaging requires Debian/Ubuntu and dpkg-dev. Discover ABI versions
     # from the installed libraries, rather than imposing cross-sysroot versions.
+    # libradapter-sdk.so is resolved from the build tree so the engine DEB does
+    # not have to be installed first (needs dpkg-shlibdeps >= 1.17).
     set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS "${CMAKE_BINARY_DIR}/bin")
     set(gaz_deb_common "")
     set(gaz_deb_nav "")
     set(gaz_deb_slam "")
@@ -107,14 +105,13 @@ set(gaz_deb_gui_qml
 
 if(GAZ_PACKAGE_TARGET STREQUAL "cart")
     set(CPACK_COMPONENTS_GROUPING ALL_COMPONENTS_IN_ONE)
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libqt6serialbus6-plugins")
-    foreach(deps gaz_deb_common gaz_deb_nav gaz_deb_slam gaz_deb_runtime)
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "radapter-headless | radapter-gui, libqt6serialbus6-plugins")
+    foreach(deps gaz_deb_common gaz_deb_nav gaz_deb_slam)
         if(${deps})
             string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", ${${deps}}")
         endif()
     endforeach()
-    set(CPACK_DEBIAN_PACKAGE_CONFLICTS "radapter-headless, radapter-gui, gaz-frames, gaz-nav, gaz-slam, gaz-cart-gui")
-    set(CPACK_DEBIAN_PACKAGE_PROVIDES "radapter-headless")
+    set(CPACK_DEBIAN_PACKAGE_CONFLICTS "gaz-frames, gaz-nav, gaz-slam, gaz-cart-gui")
 elseif(GAZ_PACKAGE_TARGET STREQUAL "gui")
     set(CPACK_COMPONENTS_GROUPING ALL_COMPONENTS_IN_ONE)
     set(CPACK_DEBIAN_PACKAGE_DEPENDS "${gaz_deb_gui_qml}")

@@ -7,7 +7,8 @@ option(GAZ_BUILD_SLAM "Build the gaz_slam plugin" ON)
 option(RADAPTER_GUI "Enable GUI capabilities" OFF)
 
 # Unified packaging target:
-#   cart — headless radapter + all three plugins + Lua cart runtime (the RPi)
+#   cart — merged native plugins (frames, nav, slam); the engine ships as the
+#          separate radapter-headless DEB, the Lua runtime as a repo checkout
 #   gui  — GUI radapter + gui.lua + QML UI (the controller PC)
 #   none — no unified package; plugins are packaged separately (development)
 #   auto — pick cart for a clean headless all-plugin configure, gui when
@@ -54,6 +55,8 @@ if(NOT CMAKE_CROSSCOMPILING AND GAZ_PACKAGE_TARGET)
         COMMAND ${CMAKE_COMMAND}
             -DBUILD_DIR=${CMAKE_BINARY_DIR}
             -DSTAGE_DIR=${CMAKE_BINARY_DIR}/packaging-smoke
+            -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DRADAPTER_BIN=$<TARGET_FILE:radapter>
             -DPKG_TARGET=${GAZ_PACKAGE_TARGET}
             -DCONFIG=$<CONFIG>
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/stage.cmake)

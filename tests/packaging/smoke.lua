@@ -1,4 +1,8 @@
 -- No cart.lua evaluation, CAN workers, serial devices or motor commands.
+-- The Lua runtime is deployed from the repository, so find mods/ and nodes/
+-- relative to this file (tests/packaging/../../).
+package.path = SCRIPT_DIR .. "/../../?.lua;" .. package.path
+
 for _, plugin in ipairs { "gaz_frames", "gaz_nav", "gaz_slam" } do
     load_plugin(plugin)
 end

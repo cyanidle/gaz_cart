@@ -39,33 +39,48 @@ When working with the driver code, build with **`ninja -C build`** run from the
 
 `GAZ_PACKAGE_TARGET` selects the unified package:
 
-- `cart` — headless radapter + all three plugins + Lua cart runtime (the RPi)
+- `cart` — the merged native plugin DEB (frames + nav + slam). Native parts
+  only: the engine ships as the separate `radapter-headless` DEB and the Lua
+  runtime is deployed from a repository checkout (the RPi)
 - `gui` — GUI radapter + `gui.lua` + QML UI (the controller PC)
 - `none` — no unified package; plugins are packaged separately (development)
 - `auto` (default) — `cart` for a clean headless all-plugin configure, `gui`
   when `RADAPTER_GUI=ON`, `none` otherwise
 
-`scripts/Dockerfile.cross` builds one `gaz-cart_0.1.0_arm64.deb` (target
-`cart`) for a **64-bit Debian/Raspberry Pi OS Bookworm** RPi4. It includes
-headless radapter, the shared SDK, all three plugins, and the Lua runtime.
-Build with:
+`scripts/packages.sh [x64|arm64]` (default `arm64`) builds the whole stack
+from the vendored submodule pins and drops three artifacts into `${OUT:-out}`:
 
-    docker buildx build -f scripts/Dockerfile.cross --target pkg --output=out .
+- `radapter-headless_<ver>_<arch>.deb` — the engine (`/usr/bin/radapter`,
+  `/usr/lib/libradapter-sdk.so`), built by `radapter/scripts/Dockerfile.cross`
+  (or `.native` for x64)
+- `radapter-ros_<ver>_<arch>.deb` — the ROS2 bridge plugin
+  (`/usr/lib/radapter/plugins/libradapter_ros.so`), built from a ROS Jazzy
+  sysroot via `radapter/scripts/Dockerfile.ros`; its dependencies pull in (and
+  thus verify) a matching ROS 2 Jazzy installation on the target
+- `gaz-cart_<ver>_<arch>.deb` — the merged native plugins, built by
+  `scripts/Dockerfile.cross` (or `.native` for x64)
 
-`scripts/packages.sh` wraps that command (`OUT=out` by default). The sysroot
-stage executes arm64 apt, so the builder needs arm64 binfmt/QEMU or native
+The Lua cart runtime is not packaged: deploy a repository checkout and run
+`radapter /path/to/gaz_cart/cart.lua <can-device> [ros-plugin-dir]`.
+Individual DEBs can also be built directly with
+`docker buildx build -f <dockerfile> --target <target> --output=out .`
+(`headless-pkg`, `cross-deb-pkg`/`native-deb-pkg`, `pkg`). The arm64 sysroot
+stages execute arm64 apt, so the builder needs arm64 binfmt/QEMU or native
 arm64 execution. Do not change host binfmt registration without approval.
-`docker buildx build --check -f scripts/Dockerfile.cross .` checks the recipe
-without executing its build stages. Cross dependencies are explicitly selected
-with `GAZ_DEB_CROSS_DISTRIBUTION=bookworm`; do not reuse them for another distro.
+`docker buildx build --check -f <dockerfile> .` checks a recipe without
+executing its build stages. Dependency names inside the containers are pinned
+to the container distribution with `GAZ_DEB_DISTRIBUTION=bookworm`; do not
+reuse them for another distro.
 
 Native packaging requires Debian/Ubuntu, `dpkg-dev`, and the Qt6/Ceres/Eigen/
 TBB development packages (boost serialization is built from source by CPM as
 a static PIC library embedded into the slam plugin, so no system boost and no
 versioned `libboost-serialization*` runtime dependency). It uses
-`dpkg-shlibdeps` to derive dependencies
-from the native binaries, not Bookworm package names. Non-Debian development
-builds remain supported, but native DEB creation is not supported there.
+`dpkg-shlibdeps` (>= 1.17) to derive dependencies from the native binaries,
+not Bookworm package names; `libradapter-sdk.so` is resolved from the build
+tree, so the engine DEB does not need to be installed first. Non-Debian
+development builds remain supported, but native DEB creation is not supported
+there.
 
 ```sh
 cmake -S . -B build-headless -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -82,13 +97,17 @@ For the controller PC, configure the same way with `-DRADAPTER_GUI=ON`
 (target defaults to `gui`) to produce `gaz-cart-gui`. Use separate build
 directories for development GUI and deployment builds.
 
-Installed layout (`gaz-cart`):
+Cart deployment on the RPi composes three pieces:
 
-- `/usr/bin/radapter`: headless executable; `/usr/bin/gaz-cart`: manual launcher.
-- `/usr/lib/libradapter-sdk.so`: shared engine, found through install RPATH.
-- `/usr/lib/radapter/plugins/libgaz_{frames,nav,slam}.so`: native plugins.
-- `/usr/share/gaz-cart/cart.lua`, `mods/*.lua`, `nodes/*.lua`: runtime scripts.
-- `/usr/share/gaz-cart/packaging-smoke.lua`: hardware-free package smoke test.
+- `radapter-headless` DEB: `/usr/bin/radapter`, `/usr/lib/libradapter-sdk.so`.
+- `gaz-cart` DEB: `/usr/lib/radapter/plugins/libgaz_{frames,nav,slam}.so`;
+  depends on `radapter-headless | radapter-gui` and
+  `libqt6serialbus6-plugins`; conflicts with the separate gaz plugin packages
+  and `gaz-cart-gui`.
+- the Lua runtime from a repository checkout (`cart.lua`, `mods/`, `nodes/`);
+  `require` finds `mods`/`nodes` next to `cart.lua`, no `LUA_PATH` needed.
+- optional `radapter-ros` DEB: `/usr/lib/radapter/plugins/libradapter_ros.so`;
+  pass `/usr/lib/radapter/plugins` as `cart.lua`'s ros-plugin-dir argument.
 
 Installed layout (`gaz-cart-gui`): `/usr/bin/radapter` (GUI build),
 `/usr/bin/gaz-gui` launcher, the shared SDK, `/usr/share/gaz-gui/gui.lua`,
@@ -97,38 +116,38 @@ Installed layout (`gaz-cart-gui`): `/usr/bin/radapter` (GUI build),
 under `/usr/share`.
 
 Only named runtime/plugin components are packaged, never `Unspecified` headers,
-static archives, GUI/QML, firmware, or the radapter test plugin. The `gaz-cart`
-package conflicts with separately installed radapter and gaz plugin packages
-(and with `gaz-cart-gui`; both own `/usr/bin/radapter`). Lua 5.4,
-LuaSocket and LuaFileSystem are embedded with JIT OFF; no system Lua modules
-are needed. QtGui is required for nav image processing, not a desktop/display.
-Qt's SocketCAN backend (`libqt6serialbus6-plugins`) is an explicit dependency.
+static archives, GUI/QML, firmware, or the radapter test plugin. Lua 5.4,
+LuaSocket and LuaFileSystem are embedded in the engine with JIT OFF; no system
+Lua modules are needed. QtGui is required for nav image processing, not a
+desktop/display. Qt's SocketCAN backend (`libqt6serialbus6-plugins`) is an
+explicit dependency of `gaz-cart`.
 
-Install with `sudo apt install ./gaz-cart_0.1.0_arm64.deb`. Installation does
-**not** start the cart, install a service, or configure CAN/serial hardware.
-After configuring the correct CAN interface/bitrate and serial permissions,
-launch manually with `gaz-cart` (arguments pass directly to `cart.lua`). The
-launcher works from any cwd without `LUA_PATH`, `LD_LIBRARY_PATH`, or Qt plugin
-environment setup. Bare plugin names use radapter's system plugin directory.
-Do not store writable state under `/usr/share/gaz-cart`.
+Install with `sudo apt install ./radapter-headless_*.deb ./gaz-cart_*.deb`
+(plus `./radapter-ros_*.deb` on ROS machines). Installation does **not** start
+the cart, install a service, or configure CAN/serial hardware. After
+configuring the correct CAN interface/bitrate and serial permissions, launch
+manually from the repository checkout. Bare plugin names use radapter's system
+plugin directory. Do not store writable state under `/usr/share`.
 
-Safe installed-package verification:
+Safe installed-package verification (from a repository checkout):
 
 ```sh
-timeout 15s radapter /usr/share/gaz-cart/packaging-smoke.lua
+timeout 15s radapter /path/to/gaz_cart/tests/packaging/smoke.lua
 ```
 
 The `packaging_smoke_cart` / `packaging_smoke_gui` CTests stage only package
 components under `build-headless/packaging-smoke/usr`, check required/forbidden
-files (the gui package must contain no cart plugins), and — for `cart` — run
-that smoke script from an unrelated cwd. It sets `QT_PLUGIN_PATH` only to
-relocate the staged plugin directory, without `LD_LIBRARY_PATH` or Lua paths.
-The smoke loads all plugins and imports Lua modules but never evaluates
-`cart.lua` or creates hardware workers. The gui target is layout-verified only
-(QML needs a display). **Never use cart startup as an install
-test:** the hardware runtime can send wheel configuration and motor commands.
-Restrict access to the control websocket (default port 6080); package installation
-does not add authentication, command arbitration, or an emergency stop.
+files (the cart package must contain neither the engine nor Lua; the gui
+package must contain no cart plugins), and — for `cart` — run the build's
+`radapter` on the source-tree smoke script from an unrelated cwd. It sets
+`QT_PLUGIN_PATH` only to relocate the staged plugin directory, without
+`LD_LIBRARY_PATH` or Lua paths. The smoke loads all plugins and imports Lua
+modules but never evaluates `cart.lua` or creates hardware workers. The gui
+target is layout-verified only (QML needs a display). **Never use cart startup
+as an install test:** the hardware runtime can send wheel configuration and
+motor commands. Restrict access to the control websocket (default port 6080);
+package installation does not add authentication, command arbitration, or an
+emergency stop.
 
 ## Cyphal ports
 

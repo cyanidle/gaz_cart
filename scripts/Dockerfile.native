@@ -1,0 +1,56 @@
+# syntax=docker/dockerfile:1
+# Native x64 gaz-cart DEB: the merged native plugins (frames, nav, slam).
+# The radapter-headless engine DEB and the Lua runtime ship separately —
+# build the whole stack with scripts/packages.sh x64.
+#
+# Extract the .deb:
+#   docker buildx build -f scripts/Dockerfile.native --target pkg --output=out .
+#   ls out/gaz-cart_*.deb
+
+# ═══════════════════════════════════════════════════════════════════════
+# Stage: builder — Bookworm x64 with the dev stack the plugins need
+# ═══════════════════════════════════════════════════════════════════════
+FROM debian:bookworm-slim AS builder
+ENV DEBIAN_FRONTEND=noninteractive
+# boost serialization is source-built (CPM, /cpm cache) as a static PIC lib.
+RUN apt update && apt install -y \
+        git cmake ninja-build build-essential file \
+        qt6-base-dev \
+        qt6-websockets-dev qt6-serialbus-dev qt6-serialport-dev \
+        libgl1-mesa-dev libxkbcommon-dev \
+        libssl-dev \
+        libtbb-dev libceres-dev libeigen3-dev \
+        libblas-dev libsuitesparse-dev liblapack-dev \
+        libatlas-base-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY . /src
+WORKDIR /src
+ENV CPM_SOURCE_CACHE=/cpm
+
+# GAZ_DEB_DISTRIBUTION pins the manual dependency list to this container's
+# Bookworm ABI versions (same list the cross build uses).
+RUN --mount=type=cache,target=/cpm \
+    cmake \
+        -D CMAKE_BUILD_TYPE=Release \
+        -D CMAKE_INSTALL_PREFIX=/usr \
+        -D GAZ_PACKAGE_TARGET=cart \
+        -D GAZ_BUILD_FRAMES=ON \
+        -D GAZ_BUILD_NAV=ON \
+        -D GAZ_BUILD_SLAM=ON \
+        -D GAZ_DEB_DISTRIBUTION=bookworm \
+        -D RADAPTER_SDK_ONLY=OFF \
+        -D RADAPTER_GUI=OFF \
+        -D RADAPTER_STATIC=OFF \
+        -D RADAPTER_JIT=OFF \
+        -D RADAPTER_JIT_STATIC=OFF \
+        -D RADAPTER_ROS2=OFF \
+        -G Ninja -B /build \
+    && cmake --build /build -j$(nproc)
+WORKDIR /build
+RUN cpack -G DEB
+
+# ═══════════════════════════════════════════════════════════════════════
+# Stage: pkg
+# ═══════════════════════════════════════════════════════════════════════
+FROM scratch AS pkg
+COPY --from=builder /build/gaz-cart_*.deb /
