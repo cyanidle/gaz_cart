@@ -36,6 +36,13 @@ if(GAZ_PACKAGE_TARGET STREQUAL "gui" AND (NOT RADAPTER_GUI OR RADAPTER_SDK_ONLY 
     message(FATAL_ERROR "GAZ_PACKAGE_TARGET=gui requires a GUI shared build. Set RADAPTER_GUI=ON and RADAPTER_SDK_ONLY/RADAPTER_STATIC=OFF, or GAZ_PACKAGE_TARGET=none for development.")
 endif()
 
+# radapter fetches Boost via CPM on the first add; CPM ignores any later add
+# under the same name, so request the components the plugins need (slam's
+# serialization) before the fetch happens.
+if(GAZ_BUILD_SLAM)
+    set(BOOST_INCLUDE_LIBRARIES serialization)
+endif()
+
 add_subdirectory(radapter)
 if(GAZ_BUILD_FRAMES)
     add_subdirectory(frames)
