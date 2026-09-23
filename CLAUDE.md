@@ -101,6 +101,19 @@ For the controller PC, configure the same way with `-DRADAPTER_GUI=ON`
 (target defaults to `gui`) to produce `gaz-cart-gui`. Use separate build
 directories for development GUI and deployment builds.
 
+**Wipe the build directory after a radapter update that touches its CPM
+bootstrap.** radapter bootstraps CPM through `radapter/cmake/get_cpm.cmake`,
+which downloads CPM into the build tree; a cached `CPM_FILE` pointing at the
+retired vendored `radapter/cmake/CPM.cmake` makes CPM abort early and every
+`CPMAddPackage` call fails with `Unknown CMake command "CPMAddPackage"`.
+
+radapter fetches Boost through CPM for its fiber support, and CPM ignores a
+second `CPMAddPackage` under the same name. A project embedding radapter as a
+subdirectory must therefore extend `BOOST_INCLUDE_LIBRARIES` before
+`add_subdirectory(radapter)` rather than fetching Boost again — that is how
+slam gets `serialization` from the same static PIC Boost, so the plugin still
+embeds it and needs no `libboost-serialization*` runtime package.
+
 Cart deployment on the RPi composes three pieces:
 
 - `radapter-jit-headless` DEB: `/usr/bin/radapter`, `/usr/lib/libradapter-sdk.so`.

@@ -40,7 +40,7 @@ endif()
 # under the same name, so request the components the plugins need (slam's
 # serialization) before the fetch happens.
 if(GAZ_BUILD_SLAM)
-    set(BOOST_INCLUDE_LIBRARIES serialization)
+    list(APPEND BOOST_INCLUDE_LIBRARIES serialization)
 endif()
 
 add_subdirectory(radapter)
