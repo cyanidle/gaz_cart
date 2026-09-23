@@ -14,11 +14,11 @@ FROM debian:bookworm-slim AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 # boost serialization is source-built (CPM, /cpm cache) as a static PIC lib.
 RUN apt update && apt install -y \
-        git cmake ninja-build build-essential file \
+        git cmake ninja-build build-essential file pkg-config \
         qt6-base-dev \
         qt6-websockets-dev qt6-serialbus-dev qt6-serialport-dev \
         libgl1-mesa-dev libxkbcommon-dev \
-        libssl-dev \
+        libssl-dev libluajit-5.1-dev \
         libtbb-dev libceres-dev libeigen3-dev \
         libblas-dev libsuitesparse-dev liblapack-dev \
         libatlas-base-dev \
@@ -26,6 +26,7 @@ RUN apt update && apt install -y \
 COPY . /src
 WORKDIR /src
 ENV CPM_SOURCE_CACHE=/cpm
+ARG BUILD_JOBS=4
 
 # GAZ_DEB_DISTRIBUTION pins the manual dependency list to this container's
 # Bookworm ABI versions (same list the cross build uses).
@@ -41,11 +42,11 @@ RUN --mount=type=cache,target=/cpm \
         -D RADAPTER_SDK_ONLY=OFF \
         -D RADAPTER_GUI=OFF \
         -D RADAPTER_STATIC=OFF \
-        -D RADAPTER_JIT=OFF \
+        -D RADAPTER_JIT=ON \
         -D RADAPTER_JIT_STATIC=OFF \
         -D RADAPTER_ROS2=OFF \
         -G Ninja -B /build \
-    && cmake --build /build -j$(nproc)
+    && cmake --build /build -j${BUILD_JOBS}
 WORKDIR /build
 RUN cpack -G DEB
 

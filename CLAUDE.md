@@ -40,7 +40,7 @@ When working with the driver code, build with **`ninja -C build`** run from the
 `GAZ_PACKAGE_TARGET` selects the unified package:
 
 - `cart` — the merged native plugin DEB (frames + nav + slam). Native parts
-  only: the engine ships as the separate `radapter-headless` DEB and the Lua
+  only: the engine ships as the separate `radapter-jit-headless` DEB and the Lua
   runtime is deployed from a repository checkout (the RPi)
 - `gui` — GUI radapter + `gui.lua` + QML UI (the controller PC)
 - `none` — no unified package; plugins are packaged separately (development)
@@ -50,15 +50,19 @@ When working with the driver code, build with **`ninja -C build`** run from the
 `scripts/packages.sh [x64|arm64]` (default `arm64`) builds the whole stack
 from the vendored submodule pins and drops three artifacts into `${OUT:-out}`:
 
-- `radapter-headless_<ver>_<arch>.deb` — the engine (`/usr/bin/radapter`,
-  `/usr/lib/libradapter-sdk.so`), built by `radapter/scripts/Dockerfile.cross`
-  (or `.native` for x64)
+- `radapter-jit-headless_<ver>_<arch>.deb` — the engine (`/usr/bin/radapter`,
+  `/usr/lib/libradapter-sdk.so`) on the LuaJIT runtime, built by
+  `radapter/scripts/Dockerfile.cross` (or `.native` for x64)
 - `radapter-ros_<ver>_<arch>.deb` — the ROS2 bridge plugin
   (`/usr/lib/radapter/plugins/libradapter_ros.so`), built from a ROS Jazzy
   sysroot via `radapter/scripts/Dockerfile.ros`; its dependencies pull in (and
   thus verify) a matching ROS 2 Jazzy installation on the target
 - `gaz-cart_<ver>_<arch>.deb` — the merged native plugins, built by
   `scripts/Dockerfile.cross` (or `.native` for x64)
+
+All three are built against LuaJIT (`RADAPTER_JIT=ON`), so the engine DEB the
+plugins depend on is the one the script ships and `dpkg -i out/*.deb` accepts
+them together. The plugin DEBs carry no Lua ABI of their own.
 
 The Lua cart runtime is not packaged: deploy a repository checkout and run
 `radapter /path/to/gaz_cart/cart.lua <can-device> [ros-plugin-dir]`.
@@ -99,9 +103,9 @@ directories for development GUI and deployment builds.
 
 Cart deployment on the RPi composes three pieces:
 
-- `radapter-headless` DEB: `/usr/bin/radapter`, `/usr/lib/libradapter-sdk.so`.
+- `radapter-jit-headless` DEB: `/usr/bin/radapter`, `/usr/lib/libradapter-sdk.so`.
 - `gaz-cart` DEB: `/usr/lib/radapter/plugins/libgaz_{frames,nav,slam}.so`;
-  depends on `radapter-headless | radapter-gui` and
+  depends on `radapter-jit-headless | radapter-jit-gui` and
   `libqt6serialbus6-plugins`; conflicts with the separate gaz plugin packages
   and `gaz-cart-gui`.
 - the Lua runtime from a repository checkout (`cart.lua`, `mods/`, `nodes/`);
@@ -116,13 +120,14 @@ Installed layout (`gaz-cart-gui`): `/usr/bin/radapter` (GUI build),
 under `/usr/share`.
 
 Only named runtime/plugin components are packaged, never `Unspecified` headers,
-static archives, GUI/QML, firmware, or the radapter test plugin. Lua 5.4,
-LuaSocket and LuaFileSystem are embedded in the engine with JIT OFF; no system
-Lua modules are needed. QtGui is required for nav image processing, not a
+static archives, GUI/QML, firmware, or the radapter test plugin. LuaSocket and
+LuaFileSystem are embedded in the engine, which links the system LuaJIT
+(`libluajit-5.1-2` or `libluajit2-5.1-2`) in the packaged builds; no Lua modules
+need to be installed. QtGui is required for nav image processing, not a
 desktop/display. Qt's SocketCAN backend (`libqt6serialbus6-plugins`) is an
 explicit dependency of `gaz-cart`.
 
-Install with `sudo apt install ./radapter-headless_*.deb ./gaz-cart_*.deb`
+Install with `sudo apt install ./radapter-jit-headless_*.deb ./gaz-cart_*.deb`
 (plus `./radapter-ros_*.deb` on ROS machines). Installation does **not** start
 the cart, install a service, or configure CAN/serial hardware. After
 configuring the correct CAN interface/bitrate and serial permissions, launch

@@ -26,7 +26,7 @@ RUN apt update && apt install -y \
         qt6-base-dev \
         qt6-websockets-dev qt6-serialbus-dev qt6-serialport-dev \
         libgl1-mesa-dev libxkbcommon-dev \
-        libssl-dev \
+        libssl-dev libluajit-5.1-dev \
         libtbb-dev libceres-dev libeigen3-dev \
         libblas-dev libsuitesparse-dev liblapack-dev \
         libatlas-base-dev \
@@ -39,7 +39,7 @@ FROM debian:bookworm-slim AS builder
 ARG TARGET_PLATFORM
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt update && apt install -y \
-        git cmake ninja-build build-essential file \
+        git cmake ninja-build build-essential file pkg-config \
         gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
         qt6-base-dev qt6-base-dev-tools \
     && rm -rf /var/lib/apt/lists/*
@@ -83,6 +83,7 @@ ENV CPM_SOURCE_CACHE=/cpm
 # Stage: cart-builder — headless radapter + all plugins, then cpack
 # ═══════════════════════════════════════════════════════════════════════
 FROM builder AS cart-builder
+ARG BUILD_JOBS=4
 # Cross-compiling: FindBLAS/FindLAPACK's check_function_exists probes fail under
 # QEMU/cross, so point Ceres' SuiteSparse check at the sysroot libs directly.
 RUN --mount=type=cache,target=/cpm \
@@ -98,13 +99,13 @@ RUN --mount=type=cache,target=/cpm \
         -D RADAPTER_SDK_ONLY=OFF \
         -D RADAPTER_GUI=OFF \
         -D RADAPTER_STATIC=OFF \
-        -D RADAPTER_JIT=OFF \
+        -D RADAPTER_JIT=ON \
         -D RADAPTER_JIT_STATIC=OFF \
         -D RADAPTER_ROS2=OFF \
         -D BLAS_LIBRARIES=/sysroot/usr/lib/aarch64-linux-gnu/atlas/libblas.so \
         -D LAPACK_LIBRARIES=/sysroot/usr/lib/aarch64-linux-gnu/atlas/liblapack.so \
         -G Ninja -B /build \
-    && cmake --build /build -j$(nproc)
+    && cmake --build /build -j${BUILD_JOBS}
 WORKDIR /build
 RUN cpack -G DEB
 
