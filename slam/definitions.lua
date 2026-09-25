@@ -1,5 +1,5 @@
 ---@meta gaz_slam
--- Lua LSP definitions for build/slam/libgaz_slam.
+-- Lua LSP definitions for libgaz_slam, loaded with load_plugin("gaz_slam").
 
 ---@class SlamMapConfig
 ---@field width integer? deprecated compatibility field; dynamic Karto bounds are used

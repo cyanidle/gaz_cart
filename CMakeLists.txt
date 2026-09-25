@@ -6,6 +6,9 @@ option(GAZ_BUILD_NAV "Build the gaz_nav plugin" ON)
 option(GAZ_BUILD_SLAM "Build the gaz_slam plugin" ON)
 option(RADAPTER_GUI "Enable GUI capabilities" OFF)
 
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
 # Unified packaging target:
 #   cart — merged native plugins (frames, nav, slam); the engine ships as the
 #          separate radapter-headless DEB, the Lua runtime as a repo checkout

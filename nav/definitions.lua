@@ -1,6 +1,6 @@
 ---@meta gaz_nav
 --  Lua LSP definitions for the gaz_nav radapter plugin (this repo's nav/*.cpp,
---  loaded with load_plugin(".../build/nav/libgaz_nav")). Project-local
+--  loaded with load_plugin("gaz_nav")). Project-local
 --  counterpart of radapter/definitions.lua — that one covers only the engine
 --  API and must not be edited for plugin workers. Keep in sync with the config
 --  structs and OnMsg/SendMsg fields in the corresponding .cpp.

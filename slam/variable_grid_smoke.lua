@@ -3,7 +3,7 @@
 
 local os = require "os"
 
-load_plugin(SCRIPT_DIR .. "/../build/nav/libgaz_nav")
+load_plugin("gaz_nav")
 
 local width, height, resolution = 5, 5, 0.5
 local origin_x, origin_y = -1.0, -1.0

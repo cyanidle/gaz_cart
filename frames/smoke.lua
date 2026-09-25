@@ -1,7 +1,7 @@
 -- Native Frames plugin smoke test.
 --   build/bin/radapter frames/smoke.lua
 
-load_plugin(SCRIPT_DIR .. "/../build/frames/libgaz_frames")
+load_plugin("gaz_frames")
 
 local frames = Frames { name = "frames_smoke" }
 frames:set("map", "odom", { x = 2, y = 1, theta = math.pi / 2 })

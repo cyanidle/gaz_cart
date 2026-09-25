@@ -17,11 +17,6 @@
 
 local socket = require "socket"
 
-local NODE_DIR = SCRIPT_DIR or "."
-if NODE_DIR:sub(1, 1) ~= "/" and lfs and lfs.currentdir then
-    NODE_DIR = assert(lfs.currentdir()) .. "/" .. NODE_DIR
-end
-
 local UPDATE_MS    = 50
 local ROBOT_RADIUS = 0.1
 
@@ -54,12 +49,14 @@ return function(cfg)
     local workers = cfg.workers or {}
 
     -- Plugin locations and all individual worker settings are supplied through
-    -- cfg.  The defaults keep this checkout runnable while allowing a deployed
-    -- cart to point at packaged/out-of-tree plugins without editing this node.
-    load_plugin(plugins.nav or (NODE_DIR .. "/../build/nav/libgaz_nav"))
+    -- cfg.  The defaults are short names, which radapter resolves next to its
+    -- own binary, in <bindir>/plugins, then /usr/lib/radapter/plugins, keeping
+    -- this checkout runnable while allowing a deployed cart to point at
+    -- packaged/out-of-tree plugins without editing this node.
+    load_plugin(plugins.nav or "gaz_nav")
     local useSlam = plugins.slam ~= false
     if useSlam then
-        load_plugin(plugins.slam or (NODE_DIR .. "/../build/slam/libgaz_slam"))
+        load_plugin(plugins.slam or "gaz_slam")
     end
 
     assert(cfg.drive, "cfg.drive required")
@@ -93,7 +90,7 @@ return function(cfg)
 
     local frames = cfg.frames
     if not frames then
-        load_plugin(plugins.frames or (NODE_DIR .. "/../build/frames/libgaz_frames"))
+        load_plugin(plugins.frames or "gaz_frames")
         frames = Frames { name = "frames" }
     end
     -- The map frame starts coincident with odometry. Localization and the UI

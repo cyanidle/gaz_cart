@@ -5,7 +5,7 @@
 local os = require "os"
 local socket = require "socket"
 
-load_plugin(SCRIPT_DIR .. "/../build/slam/libgaz_slam")
+load_plugin("gaz_slam")
 
 local slam = Slam {
     map = { update_interval_ms = 100 },

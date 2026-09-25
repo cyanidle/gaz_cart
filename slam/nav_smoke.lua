@@ -3,8 +3,8 @@
 
 local os = require "os"
 
-load_plugin(SCRIPT_DIR .. "/../build/nav/libgaz_nav")
-load_plugin(SCRIPT_DIR .. "/../build/slam/libgaz_slam")
+load_plugin("gaz_nav")
+load_plugin("gaz_slam")
 
 local lidar = Lidar {
     sim = {

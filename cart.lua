@@ -21,7 +21,7 @@ local socket     = require "socket"
 
 local CAN_DEVICE    = args[1] or "can0"   -- socketcan interface the modules sit on
 local ROS_PLUGIN_DIR = args[2]  -- optional: dir with radapter_ros; enables ROS cmd_vel
-local SIM           = false      -- sim robot + sim lidar instead of real hardware
+local SIM           = true      -- sim robot + sim lidar instead of real hardware
 local NODE_ID       = 100       -- this Pi's Cyphal node id
 local WS_PORT       = 6080     -- config-GUI websocket (gui.lua connects here)
 local TRACK_WIDTH   = 0.30     -- distance between left and right wheels, m
@@ -33,16 +33,19 @@ local SIM_START_X  = 0.5     -- initial sim robot x, m
 local SIM_START_Y  = 0.5     -- initial sim robot y, m
 local REAL_WHEEL_SPEED_STDDEV = 0.05 -- measured wheel-speed 1-sigma noise, m/s
 local SIM_WHEEL_SPEED_STDDEV  = 0.0  -- deterministic mocked encoders
-local FRAMES_PLUGIN = "/usr/lib/radapter/plugins/libgaz_frames" -- SCRIPT_DIR .. "/build/frames/libgaz_frames"
+-- Plugin names, not paths: radapter resolves a short name next to its own
+-- binary, in <bindir>/plugins, then /usr/lib/radapter/plugins, so the same
+-- cart.lua runs both from a build tree (build/bin) and from an install.
+local FRAMES_PLUGIN = "gaz_frames"
 
 -- Plugin workers remain opaque implementation details of nodes/nav.lua. Their
--- paths and full plugin-native config are declarative here, next to the rest
+-- names and full plugin-native config are declarative here, next to the rest
 -- of deployment setup. Nested fields override the node defaults.
 ---@type NavPluginPaths
 local NAV_PLUGINS = {
     frames = FRAMES_PLUGIN,
-    nav = "/usr/lib/radapter/plugins/libgaz_nav",
-    slam = false --"/usr/lib/radapter/plugins/libgaz_slam",
+    nav = "gaz_nav",
+    slam = "gaz_slam",
 }
 ---@type NavPluginWorkers
 local NAV_WORKERS = {

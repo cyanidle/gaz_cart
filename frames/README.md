@@ -38,7 +38,7 @@ previous parent/transform. Cycles are rejected when looked up.
 ## Creating it
 
 ```lua
-load_plugin(SCRIPT_DIR .. "/build/frames/libgaz_frames")
+load_plugin("gaz_frames")   -- resolved next to the radapter binary
 
 local frames = Frames { name = "frames" }
 ```
