@@ -33,7 +33,9 @@ submodule, then bump the pointer in the parent repo.
 
 When working with the driver code, build with **`ninja -C build`** run from the
 `firmware/` subdirectory. The toolchain (`arm-none-eabi-gcc`) and the configured
-`build/` directory are already present.
+`build/` directory are already present. `GAZ_WHEEL_CONTROL` picks the wheel
+controller: `foc` (default, hall FOC on the vendored SimpleFOC) or `sixstep`;
+both expose the same Cyphal ports and config ids.
 
 ## Packaging
 
