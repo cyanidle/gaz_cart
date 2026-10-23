@@ -11,7 +11,7 @@
 --  to the parameter selected by `id`.
 --
 --  **The `id`s MUST stay in sync with the `ConfigId` enum in
---  SixStep/App/app.cpp.**  `default`/`min`/`max`/`step` only drive the GUI.
+--  firmware/App/app.cpp.**  `default`/`min`/`max`/`step` only drive the GUI.
 -- =============================================================================
 
 return {

@@ -5,7 +5,7 @@ build-headless/
 out/
 .cache/
 .git/
-SixStep/
+firmware/
 radapter/build-jit/
 radapter/out/
 radapter/.cache/
