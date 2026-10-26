@@ -10,6 +10,23 @@ runs [radapter](radapter/) Lua scripts (`cart.lua`) to drive the cart and
 compute odometry. A separate host runs `gui.lua` to tune each module's runtime
 config over a websocket.
 
+## Commit intermediate work
+
+Commit as you go. A long bring-up or debugging session must never end with the
+tree dirty — every coherent step lands in a commit before you move on:
+
+- One logical step per commit, in the repo that owns it: the submodule first
+  (`SixStep/`, `firmware/Drivers/libvoltbro`, `libcxxcanard`, `radapter/`), then
+  the parent pointer bump here as a separate commit.
+- Bench-driven fixes commit **with their evidence**: the measured register dump,
+  `S` telemetry samples or `v` values that prove the change belong in the
+  message, because the hardware is not repeatable for a future reader.
+- Intermediate is fine, broken is not: the tree must configure and build
+  (`ninja -C build`, or the matching build dir) and the host tests
+  (`ctest --test-dir tests/build`) must pass in every commit you leave behind.
+- Leave no debugging leftovers: probe scripts, one-off logs and flash images go
+  to the scratchpad, not into the repository.
+
 ## Layout
 
 - `SixStep/` — STM32 wheel-module firmware (git submodule). Uses `libvoltbro`
@@ -179,3 +196,40 @@ Each module derives its ports from its (DIP-switch) node id:
 | 4000      | speed cmd | → module  | `uavcan.primitive.scalar.Real32`    | target wheel speed, m/s |
 | 4050      | direct cmd| → module  | `uavcan.primitive.scalar.Real32`    | open-loop voltage, V |
 | 4100      | config    | → module  | `uavcan.primitive.array.Integer32`  | `{id, numerator, denominator}` |
+
+## Serial bench channel (USART2)
+
+`App/serial_line.cpp` runs a SimpleFOC-style text line protocol on USART2
+(`PA2` TX / `PA3` RX, 115200 8N1, IRQ priority 5), independently of Cyphal.
+Cyphal remains the cart's control path; commands received here drive the same
+`MotorBackend`, so the channel is for bring-up, tuning and a terminal on a bench.
+
+- One ASCII request per line, `\n`-terminated (`\r` ignored, blank lines
+  skipped); every reply ends with `\r\n`:
+  `T<float>` target wheel speed (m/s), `Q<float>` open-loop voltage (V),
+  `E<0|1>` driver enable, `X` zero both set-points, `M<rate>` telemetry rate in
+  Hz (0 = off, max 100), `S` one status line, `?` command list. Anything else
+  answers `ERR <line>`.
+- Status and telemetry share one format: `S t=<m/s> v=<rad/s> e=<0|1> f=<FAULT>`,
+  where `t` is the set-point last issued over this channel — a set-point sent
+  over Cyphal is not mirrored there.
+- Floats are formatted by hand: the link line uses `--specs=nano.specs` without
+  `_printf_float`, so `%f` prints nothing on this target.
+- A line that overruns the buffer, or a burst that overruns the 128-byte RX
+  ring, is discarded up to the next newline rather than executed half-parsed.
+- Setup is spread over `Src/usart.c` (init + MSP), `Src/main.c`,
+  `Src/stm32g4xx_it.c`, `Inc/stm32g4xx_hal_conf.h` and both `.ioc` files.
+  Enabling `HAL_UART_MODULE_ENABLED` also made libvoltbro's UART configurator
+  compile, so `CMakeLists.txt` excludes `voltbro/config/serial/` (it needs
+  `nanoprintf`, which is not vendored, and its REPL is unused here).
+- The HAL UART driver files are vendored at the same HAL version (V1.2.5) as the
+  rest of `Drivers/STM32G4xx_HAL_Driver`; keep them in step when updating the HAL.
+- `tests/serial_line.cpp` covers the protocol on the host (mock HAL UART in
+  `tests/hal`); run `ctest --test-dir tests/build`.
+- From radapter use `Serial{framing = "line", protocol = "text", ...}`: each
+  received line arrives in Lua as a string and a sent string is terminated with
+  `\n`. See `radapter/examples/serial/serial_line.lua`.
+- Interactive terminal:
+  `radapter radapter/examples/serial/serial_repl.lua /dev/ttyACM0` forwards
+  every stdin line to the port and prints the replies to stdout (empty line =
+  `S`, `:q` quits). Shutdown zeroes the set-points and disables the driver.
