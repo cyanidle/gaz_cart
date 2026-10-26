@@ -23,9 +23,9 @@ local motor = Cyphal {
 local function send(val)
     motor {
         cmd_1 = {value = val},
-        cmd_2 = {value = val},
-        cmd_3 = {value = val},
-        cmd_4 = {value = val},
+        --cmd_2 = {value = val},
+        --cmd_3 = {value = val},
+        --cmd_4 = {value = val},
     }
 end
 
@@ -37,13 +37,8 @@ end)
 
 local dir = 0
 local scale = 4
--- Target for the current phase. The streamer below re-sends it at 10 Hz, so a
--- single lost CAN frame costs 100 ms instead of a whole phase — the original
--- version's one-shot send made any dropped frame look like a dead motor.
 local target = 0
 each(1000, function ()
-    -- +scale -> 0 -> -scale -> 0 -> ... : never reverse instantaneously
-    -- under load, an abrupt sign flip can trip the gate driver.
     if dir == 0 then
         target = scale
     elseif dir == 2 then
