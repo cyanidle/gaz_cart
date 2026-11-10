@@ -83,7 +83,11 @@ local INITIAL_CONFIG = {
 
 -- ---- CAN + Cyphal ----------------------------------------------------------
 
-local can = CAN { plugin = "socketcan", device = CAN_DEVICE }
+-- The wheel modules transmit Cyphal over CAN FD (see firmware/Src/fdcan.c:
+-- FDCAN_FRAME_FD_BRS, 1 Mbit nominal / 8 Mbit data). A classic socket silently
+-- drops FD frames — the modules' telemetry then looks dead while their heartbeats
+-- (classic, from this Pi) still arrive — so can_fd is what makes 7100/7300 real.
+local can = CAN { plugin = "socketcan", device = CAN_DEVICE, can_fd = true }
 
 local subscribe, publish = {}, {}
 for w, nid in pairs(WHEELS) do
@@ -294,10 +298,16 @@ end
 
 local mux = DriveMux.new { apply = hw_drive, on_state = publish_drive }
 
+local bench_wheel -- wheel driving alone in bench mode, nil when the cart drives
+local single_wheel -- defined with the bench mode below, needed by drive()
+
 ---@param v number normalized forward command, -1..1
 ---@param omega number normalized yaw command, -1..1
 ---@param source string drive source: "nav", "teleop", "joystick" or "ros"
 local function drive(v, omega, source)
+    -- A real body twist leaves the single-wheel bench mode; a neutral stream
+    -- (the joystick at rest, the keyboard tab's 20 Hz idle tick) does not.
+    if bench_wheel and (v ~= 0.0 or omega ~= 0.0) then single_wheel(nil) end
     local applied, reason = mux:command(source, v, omega)
     if applied or reason ~= "stopped" then return end
     if v == 0.0 and omega == 0.0 then return end
@@ -352,14 +362,13 @@ end
 -- ---- Single-wheel bench mode ------------------------------------------------
 -- One wheel driven on its own, with the other three parked. The GUI's teleop
 -- tab asks for it, and so does the service channel; it is how a module is
--- brought up on the bench without the cart having to drive.
-
-local bench_wheel
+-- brought up on the bench without the cart having to drive. drive() above
+-- leaves the mode as soon as a real body twist arrives.
 
 ---Drive exactly one wheel, parking the others the first time that wheel is used.
 ---@param wheel string? wheel name, nil/"" leaves the mode
 ---@param v number normalized wheel speed, -1..1 (scaled by MAX_LIN_SPD)
-local function single_wheel(wheel, v)
+function single_wheel(wheel, v)
     if not wheel or wheel == "" or wheel == "none" then
         if bench_wheel then
             set_speed("all", 0.0)
@@ -442,7 +451,6 @@ require "nodes.nav" {
 require "nodes.teleop" {
     model = teleop_model,
     drive = function(v, omega)
-        single_wheel(nil)
         if not operator_active("keyboard") then return end
         drive(v, omega, "teleop")
     end,
@@ -458,7 +466,6 @@ if JOYSTICK and TELEOP_MODE ~= "keyboard" then
     require "nodes.joystick" {
         path = JOYSTICK,
         drive = function(v, omega)
-            single_wheel(nil)
             if not operator_active("joystick") then return end
             drive(v, omega, "joystick")
         end,
@@ -519,7 +526,6 @@ require "nodes.service" {
     model = service_ws,
     state = service_state,
     drive = function(v, omega)
-        single_wheel(nil)
         drive(v, omega, "service")
     end,
     single_wheel = single_wheel,
