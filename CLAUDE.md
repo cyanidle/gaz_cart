@@ -38,6 +38,14 @@ tree dirty — every coherent step lands in a commit before you move on:
   shared by `cart.lua` and `gui.lua`. **Keep the `id`s in sync with the
   `ConfigId` enum in `firmware/App/app.cpp`.**
 - `gui.lua` — config GUI; connects to `cart.lua`'s websocket from another host.
+- `joystick/` — native `gaz_joystick` plugin: a HID **source** worker for the
+  Universal RC Joystick (`/dev/hidraw*`) that emits `{axes, buttons, raw}`.
+  Prototype input for teleop; `joystick/install-udev.sh` installs the plugdev
+  access rule, and it is not part of the `gaz-cart` DEB yet.
+- `joystick/` — native `gaz_joystick` plugin: a HID **source** worker for the
+  Universal RC Joystick (`/dev/hidraw*`) that emits `{axes, buttons, raw}`.
+  Prototype input for teleop; `joystick/install-udev.sh` installs the plugdev
+  access rule, and it is not part of the `gaz-cart` DEB yet.
 
 ## Submodules are vendored forks
 
