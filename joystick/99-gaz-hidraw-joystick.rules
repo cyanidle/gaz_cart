@@ -1,0 +1,3 @@
+# Universal RC Joystick (URCJ firmware) — gives the plugdev group read access so
+# an unprivileged radapter can read /dev/hidraw*.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5710", MODE="0660", GROUP="plugdev"
