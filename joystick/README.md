@@ -101,7 +101,37 @@ The firmware declares a single button bit (`NUM_BUTTONS 1`), and on our
 transmitter that channel chatters around the 1750 threshold at ~10 Hz, so a
 button is not usable as a stop control.
 
+## Cart teleop
+
+`nodes/joystick.lua` is the same input for the whole cart: the throttle axis
+(`y`) sets the forward speed, the other axis of that stick (`x`) the turn rate,
+and the stop organ (`slider <= -0.8` parks, `slider >= -0.5` releases) gates
+every drive source. Reports stop arriving for 0.5 s hold the cart at zero.
+
+Enable it by naming the device in `cart.lua`'s `JOYSTICK` tunable (nil by
+default — the cart also runs on robots without the joystick):
+
+```lua
+local JOYSTICK = "/dev/hidraw5"   -- hidraw node of the URCJ; nil = no joystick
+```
+
+`mods/drive_mux.lua` arbitrates the drive sources (planner, GUI keyboard teleop,
+joystick, ROS bridge): the last source that commanded a non-zero twist owns the
+wheels, so the GUI's standstill stream cannot fight the stick, and centring the
+stick (or releasing the keys) hands control to the next source. The GUI teleop
+tab mirrors the accepted command and the source that issued it.
+
+The handover is per command, not sticky: while another source is actively
+streaming its own non-zero twist (the planner, a second GUI with keys held) the
+two alternate, so drive with one source at a time.
+
+The organ latches the whole cart parked at start-up until the stop axis reports
+where it is, and while it is engaged the config tab's per-wheel speed and
+direct-voltage commands are refused as well — they spin motors without going
+through the arbiter.
+
 ## Not done yet
 
-Deadzone, expo, axis inversion, throttle/steer mapping and the cart-side
-teleop worker are deliberately out of scope for the prototype.
+Expo curves, per-axis trimming and a config-file override of the cart tunables
+are deliberately out of scope: axis inversion, the deadzone and the stop
+thresholds are node defaults today.

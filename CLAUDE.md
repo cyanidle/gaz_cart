@@ -37,15 +37,17 @@ tree dirty — every coherent step lands in a commit before you move on:
 - `mods/config_defs.lua` — single source of truth for runtime-tunable config values,
   shared by `cart.lua` and `gui.lua`. **Keep the `id`s in sync with the
   `ConfigId` enum in `firmware/App/app.cpp`.**
+- `mods/drive_mux.lua` — arbiter every drive source goes through: the last source
+  that commanded a non-zero twist owns the wheels, and the joystick stop organ
+  gates all of them. `mods/joystick_axes.lua` — axis shaping (deadzone, inversion)
+  and the stop organ itself, shared by `nodes/joystick.lua` and `debug/motor.lua`.
 - `gui.lua` — config GUI; connects to `cart.lua`'s websocket from another host.
 - `joystick/` — native `gaz_joystick` plugin: a HID **source** worker for the
   Universal RC Joystick (`/dev/hidraw*`) that emits `{axes, buttons, raw}`.
-  Prototype input for teleop; `joystick/install-udev.sh` installs the plugdev
-  access rule, and it is not part of the `gaz-cart` DEB yet.
-- `joystick/` — native `gaz_joystick` plugin: a HID **source** worker for the
-  Universal RC Joystick (`/dev/hidraw*`) that emits `{axes, buttons, raw}`.
-  Prototype input for teleop; `joystick/install-udev.sh` installs the plugdev
-  access rule, and it is not part of the `gaz-cart` DEB yet.
+  `nodes/joystick.lua` turns it into a drive source (throttle on one axis, turn
+  on the other, the slider as a stop organ) once `cart.lua`'s `JOYSTICK` tunable
+  names its hidraw node. `joystick/install-udev.sh` installs the plugdev access
+  rule, and it is not part of the `gaz-cart` DEB yet.
 
 ## Submodules are vendored forks
 

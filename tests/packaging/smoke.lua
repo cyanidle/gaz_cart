@@ -11,10 +11,11 @@ assert(type(require("socket").gettime()) == "number")
 assert(type(require("lfs").currentdir()) == "string")
 for _, name in ipairs {
     "mods.config_defs", "mods.odometry", "mods.diff_drive", "mods.rational",
+    "mods.drive_mux", "mods.joystick_axes",
 } do
     assert(type(require(name)) == "table", name)
 end
-for _, name in ipairs { "nodes.odo", "nodes.nav", "nodes.teleop", "nodes.ros" } do
+for _, name in ipairs { "nodes.odo", "nodes.nav", "nodes.teleop", "nodes.ros", "nodes.joystick" } do
     assert(type(require(name)) == "function", name)
 end
 log.info("gaz-cart packaging smoke OK")

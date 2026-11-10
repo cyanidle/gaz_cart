@@ -76,3 +76,12 @@ if(NOT CMAKE_CROSSCOMPILING AND GAZ_PACKAGE_TARGET)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/stage.cmake)
     set_tests_properties(packaging_smoke_${GAZ_PACKAGE_TARGET} PROPERTIES TIMEOUT 60)
 endif()
+
+if(NOT CMAKE_CROSSCOMPILING AND TARGET radapter)
+    enable_testing()
+    foreach(script drive_mux joystick_axes)
+        add_test(NAME ${script}
+            COMMAND $<TARGET_FILE:radapter> ${CMAKE_CURRENT_SOURCE_DIR}/tests/${script}.lua)
+        set_tests_properties(${script} PROPERTIES TIMEOUT 30)
+    endforeach()
+endif()

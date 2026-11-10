@@ -93,6 +93,10 @@ if opts.stop_below >= opts.resume_above then
     error("stop-below must be lower than resume-above, otherwise the switch has no hysteresis")
 end
 
+-- The bench script reuses the cart's axis shaping and stop organ, so a wheel
+-- tuned here behaves exactly like the cart's teleop (nodes/joystick.lua).
+package.path = SCRIPT_DIR .. "/../?.lua;" .. package.path
+
 local motor = Serial {
     framing = "line",
     protocol = "text",
@@ -101,6 +105,7 @@ local motor = Serial {
 }
 
 local socket = require "socket"
+local JoystickAxes = require "mods.joystick_axes"
 
 load_plugin("gaz_joystick")
 
@@ -127,13 +132,9 @@ end
 ---@param axes table<string, number>
 ---@return number? m/s, nil when the joystick has no such axis
 local function speed_of(axes)
-    local value = axes[opts.axis]
+    local value = JoystickAxes.value(axes, opts.axis, opts.invert, opts.deadzone)
     if value == nil then return nil end
-    if opts.invert then value = -value end
-    local magnitude = math.abs(value)
-    if magnitude <= opts.deadzone then return 0.0 end
-    local scaled = math.min((magnitude - opts.deadzone) / (1 - opts.deadzone), 1.0)
-    return (value < 0 and -1 or 1) * scaled * opts.max
+    return value * opts.max
 end
 
 ---Stop switch read from an axis. The two thresholds give hysteresis, so a
@@ -142,12 +143,7 @@ end
 ---@param axes table<string, number>
 ---@return boolean? true = stop, false = allowed, nil = disabled or inside the band
 local function stop_switch(axes)
-    if opts.stop_axis == "" then return nil end
-    local value = axes[opts.stop_axis]
-    if value == nil then return nil end
-    if value <= opts.stop_below then return true end
-    if value >= opts.resume_above then return false end
-    return nil
+    return JoystickAxes.stop_switch(axes, opts.stop_axis, opts.stop_below, opts.resume_above)
 end
 
 local function park()

@@ -7,13 +7,16 @@
 --  It also opens a websocket (WS_PORT) that gui.lua — running on another host —
 --  connects to in order to tune each module's runtime config live.
 --
---  The returned table (.drive/.stop/.set_config/.set_speed/.odo/...) is handy
---  from an interactive session or another script that `require`s this one.
+--  Four sources may drive the cart: the nav planner, the GUI keyboard teleop,
+--  the Universal RC Joystick (JOYSTICK) and the optional ROS bridge. mods/
+--  drive_mux.lua lets exactly one of them own the wheels, and the joystick's
+--  stop organ (the slider at its low extreme) gates all of them.
 -- =============================================================================
 
 local config_defs = require "mods.config_defs"
 local Odometry   = require "mods.odometry"
 local DiffDrive  = require "mods.diff_drive"
+local DriveMux   = require "mods.drive_mux"
 local Rational   = require "mods.rational"
 local socket     = require "socket"
 
@@ -29,6 +32,7 @@ local ODO_PERIOD_MS = 20       -- odometry integration period
 local TELEM_PERIOD_MS = 100    -- chart telemetry stream period
 local MAX_LIN_SPD  = 1       -- m/s at full forward command (v = 1.0)
 local MAX_ROT_SPD  = 2       -- rad/s at full turn command (omega = 1.0)
+local JOYSTICK     = nil     -- hidraw node of the URCJ, e.g. "/dev/hidraw5"; nil = no joystick
 local SIM_START_X  = 0.5     -- initial sim robot x, m
 local SIM_START_Y  = 0.5     -- initial sim robot y, m
 local REAL_WHEEL_TRAVEL_STDDEV = 0.001 -- per-wheel travel 1-sigma per odometry period, m
@@ -113,8 +117,16 @@ end
 -- Per-wheel speed targets (m/s), set by the GUI or programmatically.
 local wheel_tgt = { fl = 0.0, fr = 0.0, rl = 0.0, rr = 0.0 }
 
+-- Set by the drive arbiter below: while the joystick's stop organ is engaged
+-- the per-wheel debug paths refuse to spin the motors too.
+local stop_engaged = false
+
 --- Set target speed for one wheel or all four, and publish to Cyphal.
 local function set_speed(wheel, value)
+    if stop_engaged and value ~= 0 then
+        log.warn("set_speed {} ignored: the joystick stop organ gates the wheels", value)
+        return
+    end
     local msg = {}
     if not wheel or wheel == "all" then
         for w in pairs(WHEELS) do
@@ -129,9 +141,9 @@ local function set_speed(wheel, value)
     cyphal(msg)
 end
 
---- Command a body twist.  v (-1..1) and omega (-1..1) are normalised and
---  clamped, then scaled by MAX_LIN_SPD / MAX_ROT_SPD to physical units.
---  In sim mode the twist is integrated into a local Odometry instance
+--- Publish a body twist to the wheels.  v (-1..1) and omega (-1..1) are
+--  normalised and clamped, then scaled by MAX_LIN_SPD / MAX_ROT_SPD to physical
+--  units.  In sim mode the twist is integrated into a local Odometry instance
 --  (mocked motors); in real mode it is published to Cyphal.
 local sim_last_t = socket.gettime()
 load_plugin(FRAMES_PLUGIN)
@@ -147,9 +159,10 @@ sim_odo:reset { x = SIM_START_X, y = SIM_START_Y, theta = 0, timestamp = sim_las
 -- per-wheel travel the modules report, so both paths feed odometry identically.
 local sim_travel = { fl = 0.0, fr = 0.0, rl = 0.0, rr = 0.0 }
 
-local drive
+-- The wheels themselves, reachable only through the source arbiter below.
+local hw_drive
 if SIM then
-    drive = function(v, omega)
+    hw_drive = function(v, omega)
         local wheel = DiffDrive.wheels(v, omega, {
             track_width = TRACK_WIDTH, max_linear = MAX_LIN_SPD, max_angular = MAX_ROT_SPD,
             linear_scale = 2, angular_scale = 3,
@@ -167,7 +180,7 @@ if SIM then
         sim_odo:update(d.fl, d.fr, d.rl, d.rr, dt, now)
     end
 else
-    drive = function(v, omega)
+    hw_drive = function(v, omega)
         local wheel = DiffDrive.wheels(v, omega, {
             track_width = TRACK_WIDTH, max_linear = MAX_LIN_SPD, max_angular = MAX_ROT_SPD,
         })
@@ -182,6 +195,10 @@ end
 
 --- Open-loop voltage to one wheel ("fl".."rr") or "all", for bring-up / tuning.
 local function direct_voltage(wheel, volts)
+    if stop_engaged and volts ~= 0 then
+        log.warn("direct_voltage {} V ignored: the joystick stop organ gates the wheels", volts)
+        return
+    end
     log.info("direct_voltage {}V -> {}", volts, wheel or "all")
     if not wheel or wheel == "all" then
         for w in pairs(WHEELS) do
@@ -239,6 +256,49 @@ end
 
 send_initial_config()
 
+-- ---- Drive sources ---------------------------------------------------------
+-- Every source tags its commands with its own name so the arbiter can keep one
+-- of them in control; the accepted command is mirrored to the GUI's teleop tab,
+-- which therefore shows the joystick's twist just as it shows its own keys'.
+
+local teleop_model = branch(ws, "teleop")
+
+local blocked = {} -- sources whose command the stop organ dropped, per stop episode
+local last_source
+
+local function publish_drive(state)
+    stop_engaged = state.stopped
+    if not state.stopped and next(blocked) then blocked = {} end
+    if state.source ~= last_source then
+        if state.source then
+            log.info("drive: '{}' has the wheels", state.source)
+        else
+            log.debug("drive: wheels released")
+        end
+        last_source = state.source
+    end
+    teleop_model {
+        v = state.v,
+        omega = state.omega,
+        source = state.source or "none",
+        stopped = state.stopped,
+    }
+end
+
+local mux = DriveMux.new { apply = hw_drive, on_state = publish_drive }
+
+---@param v number normalized forward command, -1..1
+---@param omega number normalized yaw command, -1..1
+---@param source string drive source: "nav", "teleop", "joystick" or "ros"
+local function drive(v, omega, source)
+    local applied, reason = mux:command(source, v, omega)
+    if applied or reason ~= "stopped" then return end
+    if v == 0.0 and omega == 0.0 then return end
+    if blocked[source] then return end
+    blocked[source] = true
+    log.warn("drive: '{}' command ignored, the joystick stop switch gates the wheels", source)
+end
+
 -- ---- Nodes -------------------------------------------------------------------
 -- Each node is a module returning a single setup function. It gets everything
 -- hardware-tied or externally configurable through its config table, including
@@ -289,7 +349,7 @@ end
 require "nodes.nav" {
     model = branch(ws, "nav"),
     sim   = SIM,
-    drive = drive,
+    drive = function(v, omega) drive(v, omega, "nav") end,
     pose  = pose,
     odometry = odometry,
     frames = frames,
@@ -297,18 +357,29 @@ require "nodes.nav" {
     workers = NAV_WORKERS,
 }
 
--- Keyboard teleop from the GUI. Shares drive() with the nav planner — only
--- one should command the robot at a time, or they will fight.
+-- Keyboard teleop from the GUI. Another source in the same arbiter as the
+-- joystick: the wheels belong to whichever source commanded a non-zero twist last.
 require "nodes.teleop" {
-    model = branch(ws, "teleop"),
-    drive = drive,
+    model = teleop_model,
+    drive = function(v, omega) drive(v, omega, "teleop") end,
 }
+
+-- Joystick teleop: the Universal RC Joystick drives the cart, the same stop
+-- organ as the bench script debug/motor.lua latches and releases it. Axis and
+-- threshold defaults live in the node; the hidraw node is the JOYSTICK tunable.
+if JOYSTICK then
+    require "nodes.joystick" {
+        path = JOYSTICK,
+        drive = function(v, omega) drive(v, omega, "joystick") end,
+        stop = function(stopped) mux:set_stopped(stopped) end,
+    }
+end
 
 -- Optional external drive source: a ROS 2 stack publishing cmd_vel (Twist).
 -- Only one of this and the internal nav planner should run at a time.
 if ROS_PLUGIN_DIR then
     require "nodes.ros" {
-        drive = drive,
+        drive = function(v, omega) drive(v, omega, "ros") end,
         plugin_dir = ROS_PLUGIN_DIR,
     }
 end
