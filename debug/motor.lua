@@ -6,9 +6,10 @@
 --  to +-max and rescaled from a deadzone around the centre. The script enables
 --  the driver after the board answers and parks it on exit (T0, X, E0).
 --  One joystick button latches a full stop (T0, X, E0); press it again to
---  re-arm. A button that is already held at start-up is ignored until it has
---  been seen released once. Losing the joystick for 0.5 s holds the wheel at
---  zero (the driver stays enabled).
+--  re-arm. The button is debounced (it must hold its state for
+--  stop-debounce seconds, default 0.2) and a button that is already held at
+--  start-up is ignored until it has been seen released once. Losing the
+--  joystick for 0.5 s holds the wheel at zero (the driver stays enabled).
 --
 --    build/bin/radapter debug/motor.lua [port=/dev/ttyACM0] [hidraw=/dev/hidraw5]
 --        [axis=y] [invert] [max=2] [deadzone=0.05] [stop-button=1]
@@ -21,14 +22,16 @@ local USAGE = [[
 usage: radapter debug/motor.lua [port=/dev/ttyACM0] [hidraw=/dev/hidraw5]
                                 [axis=y] [invert] [max=2]
                                 [deadzone=0.05] [stop-button=1]
+                                [stop-debounce=0.2]
 
-  port         module's serial bench channel (USART2)
-  hidraw       joystick hidraw node
-  axis         joystick axis that sets the speed (x, y, z, rx, ry, rz, slider, dial)
-  invert       flip the axis direction
-  max          speed at full deflection, m/s
-  deadzone     normalized deadzone around the axis centre, 0..1
-  stop-button  joystick button that latches a full stop and re-arms it
+  port           module's serial bench channel (USART2)
+  hidraw         joystick hidraw node
+  axis           joystick axis that sets the speed (x, y, z, rx, ry, rz, slider, dial)
+  invert         flip the axis direction
+  max            speed at full deflection, m/s
+  deadzone       normalized deadzone around the axis centre, 0..1
+  stop-button    joystick button that latches a full stop and re-arms it
+  stop-debounce  seconds the stop button must hold a state to count, s
 ]]
 
 for _, arg in ipairs(args) do
@@ -47,6 +50,7 @@ local opts = {
     max = 2.0,
     deadzone = 0.05,
     stop_button = 1,
+    stop_debounce = 0.2,
 }
 
 local function set_option(key, value)
@@ -82,6 +86,7 @@ end
 if opts.max <= 0 then error("max must be positive") end
 if opts.deadzone < 0 or opts.deadzone >= 1 then error("deadzone must be in 0..1") end
 if opts.stop_button < 1 then error("stop-button must be >= 1") end
+if opts.stop_debounce < 0 then error("stop-debounce must not be negative") end
 
 local motor = Serial {
     framing = "line",
@@ -99,8 +104,10 @@ local joystick = Joystick { name = "joystick", path = opts.hidraw }
 local answered = false
 local armed = false
 local target = 0.0
-local stop_was_pressed = true
 local last_report = socket.gettime()
+local button_state = true
+local button_candidate = nil
+local button_since = 0.0
 
 local function command(line)
     log.info("> {}", line)
@@ -131,6 +138,28 @@ local function pressed(buttons, wanted)
         if button == wanted then return true end
     end
     return false
+end
+
+---Debounced stop button: an RC channel can chatter around the firmware's
+---threshold, and every accepted edge toggles the drive.
+---@param down boolean raw state from this report
+---@return boolean true only on a debounced press
+local function stop_pressed(down)
+    if down == button_state then
+        button_candidate = nil
+        return false
+    end
+    local now = socket.gettime()
+    if button_candidate ~= down then
+        button_candidate = down
+        button_since = now
+        return false
+    end
+    if now - button_since < opts.stop_debounce then return false end
+    button_state = down
+    button_candidate = nil
+    log.info("stop button {}", down and "pressed" or "released")
+    return down
 end
 
 local function park()
@@ -168,11 +197,7 @@ end)
 pipe(joystick, function(msg)
     last_report = socket.gettime()
 
-    local down = pressed(msg.buttons, opts.stop_button)
-    local edge = down and not stop_was_pressed
-    stop_was_pressed = down
-
-    if edge then
+    if stop_pressed(pressed(msg.buttons, opts.stop_button)) then
         if armed then
             log.warn("full stop: drive disabled, press button {} again to re-arm", opts.stop_button)
             park()
