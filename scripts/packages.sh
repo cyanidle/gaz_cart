@@ -13,12 +13,18 @@
 #
 # arm64 cross-builds need QEMU binfmt for the sysroot stages:
 #   docker run --privileged --rm tonistiigi/binfmt --install arm64
+#
+# BOOST_CACHE_BUST=<anything> drops the Boost sources cached in the shared
+# /cpm build-cache mount before configure, so CPM re-fetches them instead of
+# reusing a stale tree. Use it when a build picks up a broken cached Boost;
+# the other cached packages are kept.
 
 set -eu
 
 ARCH="${1:-arm64}"
 OUT="${OUT:-out}"
 BUILD_JOBS="${BUILD_JOBS:-4}"
+BOOST_CACHE_BUST="${BOOST_CACHE_BUST:-}"
 
 case "$ARCH" in
     arm64)
@@ -42,16 +48,20 @@ mkdir -p "$OUT"
 echo "=== radapter-jit-headless DEB ($ARCH) ==="
 docker buildx build -f "radapter/scripts/Dockerfile.$radapter_df" \
     --build-arg RADAPTER_JIT=ON --build-arg BUILD_JOBS="$BUILD_JOBS" \
+    --build-arg BOOST_CACHE_BUST="$BOOST_CACHE_BUST" \
     --target headless-pkg --output="$OUT" radapter
 
 echo "=== radapter-ros DEB ($ARCH) ==="
 docker buildx build -f radapter/scripts/Dockerfile.ros \
     --build-arg RADAPTER_JIT=ON --build-arg BUILD_JOBS="$BUILD_JOBS" \
+    --build-arg BOOST_CACHE_BUST="$BOOST_CACHE_BUST" \
     --target "$ros_target" --output="$OUT" radapter
 
 echo "=== gaz-cart DEB ($ARCH) ==="
 docker buildx build -f "scripts/Dockerfile.$gaz_df" \
-    --build-arg BUILD_JOBS="$BUILD_JOBS" --target pkg --output="$OUT" .
+    --build-arg BUILD_JOBS="$BUILD_JOBS" \
+    --build-arg BOOST_CACHE_BUST="$BOOST_CACHE_BUST" \
+    --target pkg --output="$OUT" .
 
 echo "=== done ==="
 ls -la "$OUT"

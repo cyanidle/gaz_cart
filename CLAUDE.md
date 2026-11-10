@@ -138,6 +138,24 @@ which downloads CPM into the build tree; a cached `CPM_FILE` pointing at the
 retired vendored `radapter/cmake/CPM.cmake` makes CPM abort early and every
 `CPMAddPackage` call fails with `Unknown CMake command "CPMAddPackage"`.
 
+**Drop a stale cached Boost with `BOOST_CACHE_BUST=1 scripts/packages.sh
+arm64`.** The DEB images keep `CPM_SOURCE_CACHE` in one build-cache mount
+(`/cpm`) shared by both architectures, so a Boost tree fetched once is reused
+by every later build; `BOOST_CACHE_BUST` (any non-empty value) deletes
+`/cpm/boost` before configure and lets CPM re-download it, leaving the other
+cached packages in place. CPM stores a package under its lowercased name, so
+Boost lives in `/cpm/boost` regardless of the case of `CPMAddPackage(NAME
+Boost ...)`.
+
+**That re-download only extracts under a UTF-8 locale.** `boost-1.92.0-cmake.7z`
+stores its pathnames as UTF-16LE and libarchive converts them through the
+locale, so under the base image's default POSIX locale extraction aborts with
+`Pathname cannot be converted from UTF-16LE to current locale` — which is why
+the bookworm builder stages do `ENV LANG=C.UTF-8`. Before that, `/cpm/boost`
+had only ever been populated by the ROS Jazzy image (which sets `LANG=C.UTF-8`
+itself) through the shared mount, and the pure-bookworm builds silently reused
+it.
+
 radapter fetches Boost through CPM for its fiber support, and CPM ignores a
 second `CPMAddPackage` under the same name. A project embedding radapter as a
 subdirectory must therefore extend `BOOST_INCLUDE_LIBRARIES` before

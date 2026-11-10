@@ -43,6 +43,10 @@ RUN apt update && apt install -y \
         gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
         qt6-base-dev qt6-base-dev-tools \
     && rm -rf /var/lib/apt/lists/*
+# Boost ships as a 7z, and libarchive reaches its UTF-16LE pathnames through
+# the locale; under the image's default POSIX locale that conversion fails and
+# the extraction aborts ("Pathname cannot be converted from UTF-16LE").
+ENV LANG=C.UTF-8
 COPY --from=sysroot /lib /sysroot/lib
 COPY --from=sysroot /usr/lib /sysroot/usr/lib
 COPY --from=sysroot /usr/bin /sysroot/usr/bin
@@ -84,10 +88,14 @@ ENV CPM_SOURCE_CACHE=/cpm
 # ═══════════════════════════════════════════════════════════════════════
 FROM builder AS cart-builder
 ARG BUILD_JOBS=4
+ARG BOOST_CACHE_BUST=
+# Any non-empty BOOST_CACHE_BUST drops the cached Boost sources first so CPM
+# re-fetches them; CPM keys the cache dir by the lowercased package name.
 # Cross-compiling: FindBLAS/FindLAPACK's check_function_exists probes fail under
 # QEMU/cross, so point Ceres' SuiteSparse check at the sysroot libs directly.
 RUN --mount=type=cache,target=/cpm \
-    cmake \
+    if [ -n "$BOOST_CACHE_BUST" ]; then rm -rf /cpm/boost; fi \
+    && cmake \
         -D CMAKE_BUILD_TYPE=Release \
         -D CMAKE_TOOLCHAIN_FILE=/opt/radapter/cmake/toolchain_arm64.cmake \
         -D CMAKE_INSTALL_PREFIX=/usr \

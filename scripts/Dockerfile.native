@@ -23,15 +23,23 @@ RUN apt update && apt install -y \
         libblas-dev libsuitesparse-dev liblapack-dev \
         libatlas-base-dev \
     && rm -rf /var/lib/apt/lists/*
+# Boost ships as a 7z, and libarchive reaches its UTF-16LE pathnames through
+# the locale; under the image's default POSIX locale that conversion fails and
+# the extraction aborts ("Pathname cannot be converted from UTF-16LE").
+ENV LANG=C.UTF-8
 COPY . /src
 WORKDIR /src
 ENV CPM_SOURCE_CACHE=/cpm
 ARG BUILD_JOBS=4
 
+ARG BOOST_CACHE_BUST=
+# Any non-empty BOOST_CACHE_BUST drops the cached Boost sources first so CPM
+# re-fetches them; CPM keys the cache dir by the lowercased package name.
 # GAZ_DEB_DISTRIBUTION pins the manual dependency list to this container's
 # Bookworm ABI versions (same list the cross build uses).
 RUN --mount=type=cache,target=/cpm \
-    cmake \
+    if [ -n "$BOOST_CACHE_BUST" ]; then rm -rf /cpm/boost; fi \
+    && cmake \
         -D CMAKE_BUILD_TYPE=Release \
         -D CMAKE_INSTALL_PREFIX=/usr \
         -D GAZ_PACKAGE_TARGET=cart \
