@@ -5,6 +5,10 @@ import QtQuick.Layouts
 // Keyboard teleoperation: arrow keys or WASD drive the robot, Space stops.
 // While keys are held, twist commands stream to the Lua teleop node at ~20 Hz.
 // Release all keys and the robot stops (dead-man switch).
+//
+// The window also mirrors the command the cart is actually executing — cart.lua
+// arbitrates the drive sources, so that twist may come from the joystick, the
+// planner or another GUI, and the source is shown next to it.
 
 Item {
     id: root
@@ -12,6 +16,12 @@ Item {
     property var model: null
     property double linFrac: 1.0    // fraction of max speed to use (0..1)
     property double rotFrac: 1.0    // fraction of max turn rate to use (0..1)
+
+    // Accepted cart command, published by the drive arbiter on the model.
+    property string cartSource: (model && typeof model.source === "string") ? model.source : "none"
+    property double cartV: (model && typeof model.v === "number") ? model.v : 0
+    property double cartOmega: (model && typeof model.omega === "number") ? model.omega : 0
+    property bool cartStopped: !!(model && model.stopped === true)
 
     // Key state: true while held
     property bool keyForward: false
@@ -44,6 +54,8 @@ Item {
     Component.onCompleted: {
         model.ensure("v")
         model.ensure("omega")
+        model.ensure("source")
+        model.ensure("stopped")
     }
 
     // Stream commands continuously while keys are held
@@ -93,7 +105,9 @@ Item {
             color: "#333"
         }
         Label {
-            text: "Click here to grab focus, then use arrow keys or WASD to drive."
+            text: "Click here to grab focus, then use arrow keys or WASD to drive. " +
+                  "Space stops this window's command; the joystick's stop organ stops " +
+                  "the cart for every source."
             color: "#666"
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
@@ -141,9 +155,64 @@ Item {
             }
         }
 
-        // ── Twist readout ─────────────────────────────────────────────
+        // ── Cart command (what the wheels are actually doing) ─────────
         GroupBox {
-            title: "Commanded twist (normalised -1..1)"
+            title: "Cart command (normalised -1..1)"
+            Layout.fillWidth: true
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 6
+
+                Rectangle {
+                    objectName: "stopBanner"
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 30
+                    visible: root.cartStopped
+                    radius: 4
+                    color: "#fdecea"
+                    border { color: "#c62828"; width: 1 }
+                    Label {
+                        anchors.centerIn: parent
+                        text: "STOP — joystick stop organ engaged"
+                        color: "#c62828"
+                        font.bold: true
+                    }
+                }
+
+                GridLayout {
+                    columns: 2
+                    rowSpacing: 6; columnSpacing: 16
+
+                    Label { text: "Issued by:"; color: "#333" }
+                    Label {
+                        objectName: "cartSourceLabel"
+                        text: root.cartSource
+                        font.bold: true
+                        color: "#1565c0"
+                    }
+
+                    Label { text: "Linear v:"; color: "#333" }
+                    Label {
+                        objectName: "cartVLabel"
+                        text: root.cartV.toFixed(3)
+                        font.bold: true
+                        color: "#1565c0"
+                    }
+
+                    Label { text: "Angular ω:"; color: "#333" }
+                    Label {
+                        objectName: "cartOmegaLabel"
+                        text: root.cartOmega.toFixed(3)
+                        font.bold: true
+                        color: "#1565c0"
+                    }
+                }
+            }
+        }
+
+        // ── Twist this window asks for ────────────────────────────────
+        GroupBox {
+            title: "This window (normalised -1..1)"
             Layout.fillWidth: true
             GridLayout {
                 anchors.fill: parent
@@ -151,10 +220,10 @@ Item {
                 rowSpacing: 6; columnSpacing: 16
 
                 Label { text: "Linear v:"; color: "#333" }
-                Label { text: root.cmdV.toFixed(3); font.bold: true; color: "#1565c0" }
+                Label { text: root.cmdV.toFixed(3); font.bold: true; color: "#777" }
 
                 Label { text: "Angular ω:"; color: "#333" }
-                Label { text: root.cmdOmega.toFixed(3); font.bold: true; color: "#1565c0" }
+                Label { text: root.cmdOmega.toFixed(3); font.bold: true; color: "#777" }
             }
         }
 
