@@ -202,12 +202,17 @@ Each module derives its ports from its (DIP-switch) node id:
 
 | Port base | + node id | direction | type                              | meaning              |
 |-----------|-----------|-----------|-----------------------------------|----------------------|
-| 7100      | encoder   | module →  | `uavcan.primitive.scalar.Natural32` | raw hall count       |
+| 7100      | travel    | module →  | `uavcan.si.unit.length.Scalar`      | accumulated wheel travel since boot, m (signed) |
 | 7200      | velocity  | module →  | `uavcan.primitive.scalar.Real32`    | shaft angular vel, rad/s |
 | 7300      | linear    | module →  | `uavcan.primitive.scalar.Real32`    | wheel linear vel, m/s |
 | 4000      | speed cmd | → module  | `uavcan.primitive.scalar.Real32`    | target wheel speed, m/s |
 | 4050      | direct cmd| → module  | `uavcan.primitive.scalar.Real32`    | open-loop voltage, V |
 | 4100      | config    | → module  | `uavcan.primitive.array.Integer32`  | `{id, numerator, denominator}` |
+
+The travel topic is the odometry input: `nodes/odo.lua` differences it per wheel
+and feeds the deltas to `mods/odometry.lua`. It is a running total from module
+boot (not a wrapped count), so a module restart resets it to zero and the node
+discards the resulting step.
 
 ## Serial bench channel (USART2)
 
