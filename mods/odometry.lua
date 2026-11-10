@@ -1,9 +1,9 @@
 -- =============================================================================
 --  Differential-drive odometry.
 --
---  Fed the linear velocity (m/s) of each of the four wheels — exactly what each
---  wheel module publishes on its Cyphal linear-speed topic — plus the elapsed
---  time, it integrates a robot-frame twist into a global pose.
+--  Fed the travel increment (m) of each of the four wheels — the difference of
+--  what each wheel module publishes on its Cyphal travel topic — plus the
+--  elapsed time, it integrates them into a global pose and a robot-frame twist.
 --
 --  Frame convention:  +x forward, +y left, +theta counter-clockwise.
 --  Sides:             left  = front-left + rear-left
@@ -14,15 +14,16 @@
 local Odometry = {}
 Odometry.__index = Odometry
 
----@param opts { trackWidth: number, wheelSpeedStdDev: number?, initialPoseStdDev: table?, frameId: string?, childFrameId: string?, frames: Frames? }
----`wheelSpeedStdDev` is the 1-sigma uncertainty of one wheel's linear-speed
----measurement in m/s. `initialPoseStdDev` may contain x/y/theta standard
----deviations. Both default to zero (deterministic odometry).
+---@param opts { trackWidth: number, wheelTravelStdDev: number?, initialPoseStdDev: table?, frameId: string?, childFrameId: string?, frames: Frames? }
+---`wheelTravelStdDev` is the 1-sigma uncertainty of one wheel's travel
+---increment in m per update — encoder quantisation and slip, not a speed.
+---`initialPoseStdDev` may contain x/y/theta standard deviations. Both default
+---to zero (deterministic odometry).
 function Odometry.new(opts)
     assert(opts and opts.trackWidth and opts.trackWidth > 0,
         "Odometry needs a positive trackWidth (left<->right wheel spacing, m)")
     local initial = opts.initialPoseStdDev or {}
-    local wheelVariance = (opts.wheelSpeedStdDev or 0.0)^2
+    local wheelVariance = (opts.wheelTravelStdDev or 0.0)^2
     local initialPxx = (initial.x or 0.0)^2
     local initialPyy = (initial.y or 0.0)^2
     local initialPtt = (initial.theta or 0.0)^2
@@ -46,7 +47,7 @@ function Odometry.new(opts)
         initialPxx = initialPxx,
         initialPyy = initialPyy,
         initialPtt = initialPtt,
-        -- covariance of the measured body twist [v, omega]
+        -- covariance of the measured body motion [forward travel, heading]
         cvv = wheelVariance * 0.25,
         cvw = 0.0,
         cww = wheelVariance / (opts.trackWidth * opts.trackWidth),
@@ -61,27 +62,29 @@ function Odometry:publishFrame()
     end
 end
 
---- Feed the four wheel linear velocities (m/s) and the time step (s).
+--- Feed the four per-wheel travel increments (m) since the previous call and
+--- the time step (s).
 ---@param timestamp number? seconds on the Unix clock for this measurement
-function Odometry:update(vFL, vFR, vRL, vRR, dt, timestamp)
-    local vLeft  = (vFL + vRL) * 0.5
-    local vRight = (vFR + vRR) * 0.5
+function Odometry:update(dFL, dFR, dRL, dRR, dt, timestamp)
+    if not (dt and dt > 0) then
+        return self
+    end
 
-    local v     = (vLeft + vRight) * 0.5              -- forward speed, m/s
-    local omega = (vRight - vLeft) / self.trackWidth  -- yaw rate, rad/s
+    local dLeft  = (dFL + dRL) * 0.5
+    local dRight = (dFR + dRR) * 0.5
 
-    -- Integrate over dt with the midpoint heading (2nd order, accurate in turns).
-    local dTheta = omega * dt
-    local dFwd   = v * dt
-    local mid    = self.theta + dTheta * 0.5
+    local dFwd   = (dLeft + dRight) * 0.5             -- forward travel, m
+    local dTheta = (dRight - dLeft) / self.trackWidth -- heading increment, rad
 
-    -- EKF prediction for f([x,y,theta], [v,omega]). Wheel-speed noise is
-    -- converted to body-twist noise above; the midpoint integration Jacobian
-    -- keeps the uncertainty consistent with the pose integration below.
+    -- Integrate along the midpoint heading (2nd order, accurate in turns).
+    local mid = self.theta + dTheta * 0.5
+
+    -- EKF prediction for x' = x + dFwd*cos(mid), y' = y + dFwd*sin(mid),
+    -- theta' = theta + dTheta, with the per-wheel travel noise in cvv/cww.
     local c, s = math.cos(mid), math.sin(mid)
-    local fxTheta, fyTheta = -dFwd * s, dFwd * c
-    local gxV, gyV = dt * c, dt * s
-    local gxW, gyW = -dFwd * s * dt * 0.5, dFwd * c * dt * 0.5
+    local fxTheta, fyTheta = -dFwd * s, dFwd * c   -- d/dtheta
+    local gxF, gxT = c, -dFwd * s * 0.5            -- d/d[dFwd, dTheta]
+    local gyF, gyT = s, dFwd * c * 0.5
 
     local pxx = self.pxx + 2 * fxTheta * self.pxt + fxTheta^2 * self.ptt
     local pxy = self.pxy + fxTheta * self.pyt + fyTheta * self.pxt
@@ -91,19 +94,19 @@ function Odometry:update(vFL, vFR, vRL, vRR, dt, timestamp)
     local pyt = self.pyt + fyTheta * self.ptt
     local ptt = self.ptt
 
-    pxx = pxx + gxV^2 * self.cvv + 2 * gxV * gxW * self.cvw + gxW^2 * self.cww
-    pxy = pxy + gxV * gyV * self.cvv
-        + (gxV * gyW + gxW * gyV) * self.cvw + gxW * gyW * self.cww
-    pxt = pxt + gxV * dt * self.cvw + gxW * dt * self.cww
-    pyy = pyy + gyV^2 * self.cvv + 2 * gyV * gyW * self.cvw + gyW^2 * self.cww
-    pyt = pyt + gyV * dt * self.cvw + gyW * dt * self.cww
-    ptt = ptt + dt^2 * self.cww
+    pxx = pxx + gxF^2 * self.cvv + 2 * gxF * gxT * self.cvw + gxT^2 * self.cww
+    pxy = pxy + gxF * gyF * self.cvv
+        + (gxF * gyT + gxT * gyF) * self.cvw + gxT * gyT * self.cww
+    pxt = pxt + gxF * self.cvw + gxT * self.cww
+    pyy = pyy + gyF^2 * self.cvv + 2 * gyF * gyT * self.cvw + gyT^2 * self.cww
+    pyt = pyt + gyF * self.cvw + gyT * self.cww
+    ptt = ptt + self.cww
 
-    self.x     = self.x + dFwd * math.cos(mid)
-    self.y     = self.y + dFwd * math.sin(mid)
+    self.x     = self.x + dFwd * c
+    self.y     = self.y + dFwd * s
     self.theta = (self.theta + dTheta) % (math.pi * 2)
 
-    self.v, self.omega = v, omega
+    self.v, self.omega = dFwd / dt, dTheta / dt
     self.pxx, self.pxy, self.pxt = pxx, pxy, pxt
     self.pyy, self.pyt, self.ptt = pyy, pyt, ptt
     self.timestamp = timestamp or self.timestamp

@@ -31,8 +31,8 @@ local MAX_LIN_SPD  = 1       -- m/s at full forward command (v = 1.0)
 local MAX_ROT_SPD  = 2       -- rad/s at full turn command (omega = 1.0)
 local SIM_START_X  = 0.5     -- initial sim robot x, m
 local SIM_START_Y  = 0.5     -- initial sim robot y, m
-local REAL_WHEEL_SPEED_STDDEV = 0.05 -- measured wheel-speed 1-sigma noise, m/s
-local SIM_WHEEL_SPEED_STDDEV  = 0.0  -- deterministic mocked encoders
+local REAL_WHEEL_TRAVEL_STDDEV = 0.001 -- per-wheel travel 1-sigma per odometry period, m
+local SIM_WHEEL_TRAVEL_STDDEV  = 0.0   -- deterministic mocked encoders
 -- Plugin names, not paths: radapter resolves a short name next to its own
 -- binary, in <bindir>/plugins, then /usr/lib/radapter/plugins, so the same
 -- cart.lua runs both from a build tree (build/bin) and from an install.
@@ -59,6 +59,7 @@ local WHEELS = { fl = 1, fr = 2, rl = 3, rr = 4 }
 
 -- Cyphal port bases (see CLAUDE.md / app.cpp). Per-module port = base + node id.
 local PORT = {
+    travel       = 7100,  -- module -> Pi, accumulated wheel travel, m
     linear_speed = 7300,  -- module -> Pi, m/s
     speed_cmd    = 4000,  -- Pi -> module, m/s
     direct_cmd   = 4050,  -- Pi -> module, open-loop voltage (V)
@@ -79,6 +80,7 @@ local can = CAN { plugin = "socketcan", device = CAN_DEVICE }
 
 local subscribe, publish = {}, {}
 for w, nid in pairs(WHEELS) do
+    subscribe["trv_" .. w] = { type = "uavcan.si.unit.length.Scalar.1.0",    port = PORT.travel       + nid }
     subscribe["spd_" .. w] = { type = "uavcan.primitive.scalar.Real32.1.0",   port = PORT.linear_speed + nid }
     publish  ["cmd_" .. w] = { type = "uavcan.primitive.scalar.Real32.1.0",   port = PORT.speed_cmd    + nid }
     publish  ["dir_" .. w] = { type = "uavcan.primitive.scalar.Real32.1.0",   port = PORT.direct_cmd   + nid }
@@ -95,9 +97,14 @@ local cyphal = Cyphal {
 
 -- latest wheel linear velocity (m/s), refreshed from Cyphal
 local wheel_v = { fl = 0.0, fr = 0.0, rl = 0.0, rr = 0.0 }
+-- latest absolute wheel travel (m since the module booted), refreshed from Cyphal
+local wheel_travel = { fl = 0.0, fr = 0.0, rl = 0.0, rr = 0.0 }
 for w in pairs(WHEELS) do
     on(cyphal, "spd_" .. w, function(msg)
         wheel_v[w] = msg.value or 0.0
+    end)
+    on(cyphal, "trv_" .. w, function(msg)
+        wheel_travel[w] = msg.meter or 0.0
     end)
 end
 
@@ -131,10 +138,14 @@ load_plugin(FRAMES_PLUGIN)
 local frames = Frames { name = "frames" }
 local sim_odo = Odometry.new {
     trackWidth = TRACK_WIDTH,
-    wheelSpeedStdDev = SIM_WHEEL_SPEED_STDDEV,
+    wheelTravelStdDev = SIM_WHEEL_TRAVEL_STDDEV,
     frames = frames,
 }
 sim_odo:reset { x = SIM_START_X, y = SIM_START_Y, theta = 0, timestamp = sim_last_t }
+
+-- Mock encoders: commanded wheel speeds integrate into the same absolute
+-- per-wheel travel the modules report, so both paths feed odometry identically.
+local sim_travel = { fl = 0.0, fr = 0.0, rl = 0.0, rr = 0.0 }
 
 local drive
 if SIM then
@@ -145,9 +156,15 @@ if SIM then
         })
         local now = socket.gettime()
         local dt = now - sim_last_t
+        if dt <= 0 then return end
         sim_last_t = now
         if dt > 0.5 then dt = 0.05 end
-        sim_odo:update(wheel.fl, wheel.fr, wheel.rl, wheel.rr, dt, now)
+        local d = {}
+        for w in pairs(WHEELS) do
+            d[w] = wheel[w] * dt
+            sim_travel[w] = sim_travel[w] + d[w]
+        end
+        sim_odo:update(d.fl, d.fr, d.rl, d.rr, dt, now)
     end
 else
     drive = function(v, omega)
@@ -238,12 +255,15 @@ local odo = require "nodes.odo" {
         end
         return w
     end,
+    travel = function()
+        return wheel_travel
+    end,
     set_speed = set_speed,
     set_config = set_config,
     direct_voltage = direct_voltage,
     odo_period_ms = ODO_PERIOD_MS,
     telem_period_ms = TELEM_PERIOD_MS,
-    wheel_speed_stddev = REAL_WHEEL_SPEED_STDDEV,
+    wheel_travel_stddev = REAL_WHEEL_TRAVEL_STDDEV,
     frames = frames,
 }
 

@@ -1,25 +1,31 @@
 -- =============================================================================
 --  Odometry + wheel-tuning node.
 --
---  Integrates diff-drive odometry from the per-wheel speeds, streams chart +
---  odom telemetry to the WheelConfig tab, and applies its config / speed /
---  direct-voltage commands. Talks to the GUI through cfg.model — a branch()
---  worker namespaced under "odo" (the WheelConfig model branch key in Main.qml).
+--  Integrates diff-drive odometry from the per-wheel absolute travel, streams
+--  chart + odom telemetry to the WheelConfig tab, and applies its config /
+--  speed / direct-voltage commands. Talks to the GUI through cfg.model — a
+--  branch() worker namespaced under "odo" (the WheelConfig model branch key in
+--  Main.qml).
 -- =============================================================================
 
 local Odometry = require "mods.odometry"
 local socket   = require "socket"
 
+-- No wheel of this cart can cover more than this in one odometry period, so a
+-- larger step is a discontinuity (a module rebooted and restarted its travel).
+local MAX_WHEEL_SPEED = 5.0  -- m/s
+
 ---@class OdoConfig
 ---@field model Pipable<OdoGuiTelemetry, OdoGuiCommand> GUI node: emits telemetry, receives commands
 ---@field track_width number distance between left and right wheels, m
 ---@field wheels fun(): table<string, {tgt: number, act: number}> per-wheel target + actual linear speed, m/s
+---@field travel fun(): table<string, number> per-wheel absolute travel since the module booted, m
 ---@field set_speed fun(wheel: string?, value: number) closed-loop speed target, m/s
 ---@field set_config fun(wheel: string?, id: integer, value: number) push one runtime config value
 ---@field direct_voltage fun(wheel: string?, volts: number) open-loop voltage, V
 ---@field odo_period_ms integer? odometry integration period (default 20)
 ---@field telem_period_ms integer? telemetry stream period (default 100)
----@field wheel_speed_stddev number? per-wheel speed 1-sigma uncertainty, m/s
+---@field wheel_travel_stddev number? per-wheel travel 1-sigma uncertainty, m per period
 ---@field frames Frames? native tf-style worker receiving odom -> base_link
 ---@field odom_frame string? pose frame id (default "odom")
 ---@field base_frame string? body frame id (default "base_link")
@@ -30,19 +36,32 @@ local socket   = require "socket"
 return function(cfg)
     local odo = Odometry.new {
         trackWidth = cfg.track_width,
-        wheelSpeedStdDev = cfg.wheel_speed_stddev,
+        wheelTravelStdDev = cfg.wheel_travel_stddev,
         frameId = cfg.odom_frame,
         childFrameId = cfg.base_frame,
         frames = cfg.frames,
     }
 
-    local last_t
+    local last_t = socket.gettime()
+    local last_travel = {}
     each(cfg.odo_period_ms or 20, function()
         local now = socket.gettime()
-        local dt  = last_t and (now - last_t) or 0.0
+        local dt  = now - last_t
+        if dt <= 0 then return end
         last_t = now
-        local w = cfg.wheels()
-        odo:update(w.fl.act, w.fr.act, w.rl.act, w.rr.act, dt, now)
+
+        local d = {}
+        for wheel, travel in pairs(cfg.travel()) do
+            local previous = last_travel[wheel]
+            last_travel[wheel] = travel
+            local step = previous and (travel - previous) or 0.0
+            if math.abs(step) > MAX_WHEEL_SPEED * dt then
+                log.warn("wheel {} travel jumped {} m in {} s: ignoring it", wheel, step, dt)
+                step = 0.0
+            end
+            d[wheel] = step
+        end
+        odo:update(d.fl or 0.0, d.fr or 0.0, d.rl or 0.0, d.rr or 0.0, dt, now)
     end)
 
     pipe(cfg.model, function(msg)
