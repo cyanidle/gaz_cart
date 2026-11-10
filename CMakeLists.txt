@@ -79,7 +79,7 @@ endif()
 
 if(NOT CMAKE_CROSSCOMPILING AND TARGET radapter)
     enable_testing()
-    foreach(script drive_mux joystick_axes)
+    foreach(script drive_mux joystick_axes teleop_switch)
         add_test(NAME ${script}
             COMMAND $<TARGET_FILE:radapter> ${CMAKE_CURRENT_SOURCE_DIR}/tests/${script}.lua)
         set_tests_properties(${script} PROPERTIES TIMEOUT 30)

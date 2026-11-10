@@ -22,6 +22,13 @@ Item {
     property double cartV: (model && typeof model.v === "number") ? model.v : 0
     property double cartOmega: (model && typeof model.omega === "number") ? model.omega : 0
     property bool cartStopped: !!(model && model.stopped === true)
+    // Which manual input owns the cart right now (mods/teleop_switch.lua):
+    // "joystick" while the stick reports, "keyboard" otherwise.
+    property string operatorInput: (model && typeof model.operator === "string") ? model.operator : "keyboard"
+
+    // Bench mode: drive exactly one wheel, the other three parked.
+    property bool singleWheel: false
+    property string singleWheelName: "fl"
 
     // Key state: true while held
     property bool keyForward: false
@@ -47,8 +54,14 @@ Item {
             omega = Math.max(-1, Math.min(1, omega))
         }
         cmdV = v
-        cmdOmega = omega
-        if (model) model.send({ action: "twist", v: v, omega: omega })
+        cmdOmega = singleWheel ? 0 : omega
+        if (!model) return
+        if (singleWheel) {
+            // One wheel on the bench: forward/backward only, everything else parked.
+            model.send({ action: "wheel", wheel: singleWheelName, v: v })
+        } else {
+            model.send({ action: "twist", v: v, omega: omega })
+        }
     }
 
     Component.onCompleted: {
@@ -56,6 +69,7 @@ Item {
         model.ensure("omega")
         model.ensure("source")
         model.ensure("stopped")
+        model.ensure("operator")
     }
 
     // Stream commands continuously while keys are held
@@ -183,6 +197,14 @@ Item {
                     columns: 2
                     rowSpacing: 6; columnSpacing: 16
 
+                    Label { text: "Operator input:"; color: "#333" }
+                    Label {
+                        objectName: "operatorLabel"
+                        text: root.operatorInput
+                        font.bold: true
+                        color: root.operatorInput === "keyboard" ? "#1565c0" : "#6a1b9a"
+                    }
+
                     Label { text: "Issued by:"; color: "#333" }
                     Label {
                         objectName: "cartSourceLabel"
@@ -224,6 +246,51 @@ Item {
 
                 Label { text: "Angular ω:"; color: "#333" }
                 Label { text: root.cmdOmega.toFixed(3); font.bold: true; color: "#777" }
+            }
+        }
+
+        // ── Bench: one wheel on its own ───────────────────────────────
+        GroupBox {
+            title: "Bench — single wheel"
+            Layout.fillWidth: true
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 8
+
+                Label {
+                    text: "Drive one wheel with W/S (or ▲/▼); the other three stay parked. " +
+                          "Use it to bring up a module without driving the cart."
+                    color: "#666"
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    CheckBox {
+                        id: singleWheelCheck
+                        objectName: "singleWheelCheck"
+                        text: "single wheel"
+                        checked: false
+                        onCheckedChanged: {
+                            root.singleWheel = checked
+                            if (model) model.send({ action: "wheel", wheel: checked ? root.singleWheelName : "", v: 0 })
+                        }
+                    }
+                    ComboBox {
+                        id: singleWheelBox
+                        objectName: "singleWheelBox"
+                        model: ["fl", "fr", "rl", "rr"]
+                        enabled: root.singleWheel
+                        Layout.preferredWidth: 80
+                        onCurrentTextChanged: {
+                            root.singleWheelName = currentText
+                            if (root.singleWheel && model) model.send({ action: "wheel", wheel: currentText, v: 0 })
+                        }
+                    }
+                    Item { Layout.fillWidth: true }
+                }
             }
         }
 

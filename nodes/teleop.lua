@@ -9,6 +9,7 @@
 ---@class TeleopConfig
 ---@field model Pipable<any, TeleopGuiCommand> GUI node: receives normalized twist commands
 ---@field drive fun(v: number, omega: number) body twist sink (m/s, rad/s)
+---@field wheel fun(wheel: string?, v: number)? single-wheel bench sink, normalized wheel speed
 
 ---Wire the teleop node.
 ---@param cfg TeleopConfig
@@ -16,6 +17,9 @@ return function(cfg)
     pipe(cfg.model, function(msg)
         if msg.action == "twist" then
             cfg.drive(msg.v or 0, msg.omega or 0)
+        elseif msg.action == "wheel" then
+            assert(cfg.wheel, "this cart has no single-wheel bench mode")
+            cfg.wheel(msg.wheel, msg.v or 0)
         end
     end)
 end

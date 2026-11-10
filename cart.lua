@@ -17,6 +17,7 @@ local config_defs = require "mods.config_defs"
 local Odometry   = require "mods.odometry"
 local DiffDrive  = require "mods.diff_drive"
 local DriveMux   = require "mods.drive_mux"
+local TeleopSwitch = require "mods.teleop_switch"
 local Rational   = require "mods.rational"
 local socket     = require "socket"
 
@@ -24,15 +25,17 @@ local socket     = require "socket"
 
 local CAN_DEVICE    = args[1] or "can0"   -- socketcan interface the modules sit on
 local ROS_PLUGIN_DIR = args[2]  -- optional: dir with radapter_ros; enables ROS cmd_vel
-local SIM           = true      -- sim robot + sim lidar instead of real hardware
+local SIM           = os.getenv("GAZ_SIM") == "1" -- sim robot + sim lidar instead of real hardware
 local NODE_ID       = 100       -- this Pi's Cyphal node id
 local WS_PORT       = 6080     -- config-GUI websocket (gui.lua connects here)
+local SERVICE_PORT  = 6081     -- diagnostic/control websocket (nodes/service.lua)
+local TELEOP_MODE   = "auto"   -- "auto": joystick when it reports, else the GUI keyboard
 local TRACK_WIDTH   = 0.30     -- distance between left and right wheels, m
 local ODO_PERIOD_MS = 20       -- odometry integration period
 local TELEM_PERIOD_MS = 100    -- chart telemetry stream period
 local MAX_LIN_SPD  = 1       -- m/s at full forward command (v = 1.0)
 local MAX_ROT_SPD  = 2       -- rad/s at full turn command (omega = 1.0)
-local JOYSTICK     = nil     -- hidraw node of the URCJ, e.g. "/dev/hidraw5"; nil = no joystick
+local JOYSTICK     = "/dev/hidraw0"     -- hidraw node of the URCJ, e.g. "/dev/hidraw5"; nil = no joystick
 local SIM_START_X  = 0.5     -- initial sim robot x, m
 local SIM_START_Y  = 0.5     -- initial sim robot y, m
 local REAL_WHEEL_TRAVEL_STDDEV = 0.001 -- per-wheel travel 1-sigma per odometry period, m
@@ -54,7 +57,7 @@ local NAV_PLUGINS = {
 ---@type NavPluginWorkers
 local NAV_WORKERS = {
     -- lidar = { serial = { port = "/dev/ttyUSB0" } }, -- real robot example
-    slam = { mapper = { do_loop_closing = true } },
+    -- slam = { mapper = { do_loop_closing = true } },
 }
 
 -- Wheel module node ids (set by each module's DIP switches).  Keys are the
@@ -176,6 +179,10 @@ if SIM then
         for w in pairs(WHEELS) do
             d[w] = wheel[w] * dt
             sim_travel[w] = sim_travel[w] + d[w]
+            -- Mocked modules: ideal motors, so the tuning chart and the wheel
+            -- telemetry show what the cart was asked for instead of nothing.
+            wheel_tgt[w] = wheel[w]
+            wheel_v[w] = wheel[w]
         end
         sim_odo:update(d.fl, d.fr, d.rl, d.rr, dt, now)
     end
@@ -299,6 +306,79 @@ local function drive(v, omega, source)
     log.warn("drive: '{}' command ignored, the joystick stop switch gates the wheels", source)
 end
 
+-- ---- Operator input ---------------------------------------------------------
+-- The joystick and the GUI's WASD window would otherwise alternate ownership of
+-- the wheels command by command (the arbiter hands the wheels to whichever of
+-- them last asked for a non-zero twist). mods/teleop_switch.lua picks one of
+-- them up front: the stick while it reports, the keyboard otherwise, and
+-- TELEOP_MODE can force either. The choice is mirrored to the teleop tab.
+
+local joystick_status = {
+    receiving = false, axes = {}, stopped = false, calibrated = true, age_ms = 0,
+}
+
+local select_source = TeleopSwitch.new {
+    mode = TELEOP_MODE,
+    has_joystick = JOYSTICK ~= nil and TELEOP_MODE ~= "keyboard",
+    on_change = function(source, previous)
+        log.info("operator input: {} -> {}", previous, source)
+        teleop_model { operator = source }
+    end,
+}
+
+local keyboard_blocked, joystick_blocked
+
+---Ask the switch whether the operator input a source carries is live, warning
+---once per takeover instead of silently dropping every command.
+---@param wanted string "keyboard" or "joystick"
+---@return boolean
+local function operator_active(wanted)
+    if select_source:allows(wanted) then
+        if wanted == "keyboard" then keyboard_blocked = false else joystick_blocked = false end
+        return true
+    end
+    if wanted == "keyboard" and not keyboard_blocked then
+        keyboard_blocked = true
+        log.warn("keyboard teleop ignored: the operator input belongs to '{}' (TELEOP_MODE={})",
+            select_source:active(), TELEOP_MODE)
+    elseif wanted == "joystick" and not joystick_blocked then
+        joystick_blocked = true
+        log.warn("joystick ignored: the operator input belongs to '{}' (TELEOP_MODE={})",
+            select_source:active(), TELEOP_MODE)
+    end
+    return false
+end
+
+-- ---- Single-wheel bench mode ------------------------------------------------
+-- One wheel driven on its own, with the other three parked. The GUI's teleop
+-- tab asks for it, and so does the service channel; it is how a module is
+-- brought up on the bench without the cart having to drive.
+
+local bench_wheel
+
+---Drive exactly one wheel, parking the others the first time that wheel is used.
+---@param wheel string? wheel name, nil/"" leaves the mode
+---@param v number normalized wheel speed, -1..1 (scaled by MAX_LIN_SPD)
+local function single_wheel(wheel, v)
+    if not wheel or wheel == "" or wheel == "none" then
+        if bench_wheel then
+            set_speed("all", 0.0)
+            log.info("single-wheel bench mode: off")
+            bench_wheel = nil
+        end
+        return
+    end
+    assert(WHEELS[wheel], ("unknown wheel '%s' (expected fl/fr/rl/rr)"):format(tostring(wheel)))
+    if wheel ~= bench_wheel then
+        for name in pairs(WHEELS) do
+            if name ~= wheel then set_speed(name, 0.0) end
+        end
+        bench_wheel = wheel
+        log.info("single-wheel bench mode: {}", wheel)
+    end
+    set_speed(wheel, (v or 0.0) * MAX_LIN_SPD)
+end
+
 -- ---- Nodes -------------------------------------------------------------------
 -- Each node is a module returning a single setup function. It gets everything
 -- hardware-tied or externally configurable through its config table, including
@@ -357,21 +437,36 @@ require "nodes.nav" {
     workers = NAV_WORKERS,
 }
 
--- Keyboard teleop from the GUI. Another source in the same arbiter as the
--- joystick: the wheels belong to whichever source commanded a non-zero twist last.
+-- Keyboard teleop from the GUI: only while the switch says the operator input
+-- is the keyboard (the joystick takes it over while it reports).
 require "nodes.teleop" {
     model = teleop_model,
-    drive = function(v, omega) drive(v, omega, "teleop") end,
+    drive = function(v, omega)
+        single_wheel(nil)
+        if not operator_active("keyboard") then return end
+        drive(v, omega, "teleop")
+    end,
+    wheel = single_wheel,
 }
 
 -- Joystick teleop: the Universal RC Joystick drives the cart, the same stop
 -- organ as the bench script debug/motor.lua latches and releases it. Axis and
 -- threshold defaults live in the node; the hidraw node is the JOYSTICK tunable.
-if JOYSTICK then
+-- The node also reports its axes and stop state, which feeds the switch and the
+-- service channel.
+if JOYSTICK and TELEOP_MODE ~= "keyboard" then
     require "nodes.joystick" {
         path = JOYSTICK,
-        drive = function(v, omega) drive(v, omega, "joystick") end,
+        drive = function(v, omega)
+            single_wheel(nil)
+            if not operator_active("joystick") then return end
+            drive(v, omega, "joystick")
+        end,
         stop = function(stopped) mux:set_stopped(stopped) end,
+        on_status = function(status)
+            joystick_status = status
+            select_source:joystick_reporting(status.receiving)
+        end,
     }
 end
 
@@ -384,4 +479,54 @@ if ROS_PLUGIN_DIR then
     }
 end
 
-log.info("cart up: node {} on {}, ws on :{}", NODE_ID, CAN_DEVICE, WS_PORT)
+-- ---- Service channel ---------------------------------------------------------
+-- A second websocket with the complete runtime state and every command, for
+-- bench bring-up and remote diagnosis. The operator GUI never talks to it.
+
+local service_ws = WebsocketServer {
+    name = "service_ws",
+    port = SERVICE_PORT,
+    protocol = "msgpack",
+}
+
+---@return table complete runtime snapshot published on the service channel
+local function service_state()
+    local wheels = {}
+    for name in pairs(WHEELS) do
+        wheels[name] = {
+            tgt = wheel_tgt[name],
+            act = wheel_v[name],
+            travel = wheel_travel[name],
+        }
+    end
+    local odom = odometry()
+    return {
+        sim = SIM,
+        wheels = wheels,
+        mux = mux:state(),
+        operator = select_source:active(),
+        teleop_mode = TELEOP_MODE,
+        bench_wheel = bench_wheel or "none",
+        joystick = joystick_status,
+        odom = {
+            x = odom.pose.x, y = odom.pose.y, theta = odom.pose.theta,
+            v = odom.twist.linear, omega = odom.twist.angular,
+        },
+    }
+end
+
+require "nodes.service" {
+    model = service_ws,
+    state = service_state,
+    drive = function(v, omega)
+        single_wheel(nil)
+        drive(v, omega, "service")
+    end,
+    single_wheel = single_wheel,
+    set_speed = set_speed,
+    set_config = set_config,
+    direct_voltage = direct_voltage,
+    stop = function(stopped) mux:set_stopped(stopped) end,
+}
+
+log.info("cart up: node {} on {}, ws on :{} (service :{})", NODE_ID, CAN_DEVICE, WS_PORT, SERVICE_PORT)

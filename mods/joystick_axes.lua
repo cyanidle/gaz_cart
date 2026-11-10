@@ -21,6 +21,38 @@ function JoystickAxes.value(axes, name, invert, deadzone)
     return value < 0 and -magnitude or magnitude
 end
 
+---Learn each axis' rest value. RC sticks rarely return to exactly zero (the URCJ
+---rests at x≈0.24), so an axis that should read centred looks like a permanent
+---command. The node averages the first reports — the cart boots parked and
+---nobody holds the stick then — and subtracts the result.
+---@param neutral table<string, number> per-axis running average, updated in place
+---@param axes table<string, number>
+---@param rate number? 0..1 weight of one new sample (default 0.2)
+---@return table<string, number> neutral
+function JoystickAxes.learn(neutral, axes, rate)
+    rate = rate or 0.2
+    assert(rate > 0 and rate <= 1, "learn rate must be in 0..1")
+    for name, value in pairs(axes) do
+        local previous = neutral[name]
+        neutral[name] = previous and (previous + (value - previous) * rate) or value
+    end
+    return neutral
+end
+
+---Copy `axes` with the learned rest values removed, clamped back into -1..1.
+---Axes without a learned rest value are passed through unchanged.
+---@param axes table<string, number>
+---@param neutral table<string, number>
+---@return table<string, number>
+function JoystickAxes.centre(axes, neutral)
+    local out = {}
+    for name, value in pairs(axes) do
+        local rest = neutral[name]
+        out[name] = rest and math.max(-1.0, math.min(1.0, value - rest)) or value
+    end
+    return out
+end
+
 ---Read the stop organ off one axis. The two thresholds give hysteresis: inside
 ---the band the reading is inconclusive, so the caller keeps its previous state.
 ---@param axes table<string, number>

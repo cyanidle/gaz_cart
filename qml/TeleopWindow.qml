@@ -5,7 +5,7 @@ import QtQuick.Controls
 ApplicationWindow {
     id: root
     visible: true
-    width: 400; height: 660
+    width: 400; height: 780
     title: "gaz_cart — Teleop"
     color: "#f0f0f0"
 
