@@ -59,8 +59,9 @@ submodule, then bump the pointer in the parent repo.
 When working with the driver code, build with **`ninja -C build`** run from the
 `firmware/` subdirectory. The toolchain (`arm-none-eabi-gcc`) and the configured
 `build/` directory are already present. `VB_MOTOR_IMPL` picks the wheel
-controller: `simplefoc` (default, hall FOC on the vendored Arduino-FOC tree),
-`voltbro-foc` (libvoltbro FOC) or `sixstep`; all three sit behind
+controller: `sixstep` (default, libvoltbro six-step commutation + external
+velocity PID), `simplefoc` (hall FOC on the vendored Arduino-FOC tree) or
+`voltbro-foc` (libvoltbro FOC); all three sit behind
 `App/motor_backend.h` and expose the same Cyphal ports and config ids.
 
 ## Packaging
