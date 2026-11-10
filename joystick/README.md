@@ -90,6 +90,17 @@ Prints one line per change and nothing while the sticks are still:
 x=+0.00 y=-0.42 z=-1.00 rx=+0.05 ry=+0.00 rz=-1.00 slider=-1.00 dial=-1.00 buttons=-
 ```
 
+## Debug teleop
+
+`debug/motor.lua` drives one module over its USART2 bench channel from this
+plugin: `axis=y` (0.05 deadzone, rescaled) → ±`max` m/s, `slider <= -0.8` parks
+the drive, `slider >= -0.5` enables it again, 0.5 s without reports holds the
+wheel at zero. Run `build/bin/radapter debug/motor.lua help` for the options.
+
+The firmware declares a single button bit (`NUM_BUTTONS 1`), and on our
+transmitter that channel chatters around the 1750 threshold at ~10 Hz, so a
+button is not usable as a stop control.
+
 ## Not done yet
 
 Deadzone, expo, axis inversion, throttle/steer mapping and the cart-side

@@ -4,15 +4,17 @@
 --  gaz_joystick (/dev/hidraw5) -> USART2 bench channel of a module
 --  (/dev/ttyACM0): the chosen axis sets the target wheel speed in m/s, clamped
 --  to +-max and rescaled from a deadzone around the centre. The script enables
---  the driver after the board answers and parks it on exit (T0, X, E0).
---  One joystick button latches a full stop (T0, X, E0); press it again to
---  re-arm. The button is debounced (it must hold its state for
---  stop-debounce seconds, default 0.2) and a button that is already held at
---  start-up is ignored until it has been seen released once. Losing the
---  joystick for 0.5 s holds the wheel at zero (the driver stays enabled).
+--  the driver once the board answers and parks it on exit (T0, X, E0).
+--
+--  The stop switch is an axis at its low extreme (slider = -1 by default):
+--  below stop-below the drive gets T0, X, E0 and stays disabled, above
+--  resume-above it is enabled again. The gap between the thresholds is
+--  hysteresis, so a channel hovering at the edge cannot flap the driver. The
+--  drive is also held at zero when joystick reports stop arriving for 0.5 s.
 --
 --    build/bin/radapter debug/motor.lua [port=/dev/ttyACM0] [hidraw=/dev/hidraw5]
---        [axis=y] [invert] [max=2] [deadzone=0.05] [stop-button=1]
+--        [axis=y] [invert] [max=2] [deadzone=0.05]
+--        [stop-axis=slider] [stop-below=-0.8] [resume-above=-0.5]
 --
 --  Options are `key=value` words, because radapter's own CLI owns the dashed
 --  flags. Never point this at a powered cart: it commands the drive directly.
@@ -20,9 +22,9 @@
 
 local USAGE = [[
 usage: radapter debug/motor.lua [port=/dev/ttyACM0] [hidraw=/dev/hidraw5]
-                                [axis=y] [invert] [max=2]
-                                [deadzone=0.05] [stop-button=1]
-                                [stop-debounce=0.2]
+                                [axis=y] [invert] [max=2] [deadzone=0.05]
+                                [stop-axis=slider] [stop-below=-0.8]
+                                [resume-above=-0.5]
 
   port           module's serial bench channel (USART2)
   hidraw         joystick hidraw node
@@ -30,8 +32,9 @@ usage: radapter debug/motor.lua [port=/dev/ttyACM0] [hidraw=/dev/hidraw5]
   invert         flip the axis direction
   max            speed at full deflection, m/s
   deadzone       normalized deadzone around the axis centre, 0..1
-  stop-button    joystick button that latches a full stop and re-arms it
-  stop-debounce  seconds the stop button must hold a state to count, s
+  stop-axis      axis used as the stop switch; empty string disables it
+  stop-below     stop-axis value at or below which the drive is parked
+  resume-above   stop-axis value at or above which the drive is enabled again
 ]]
 
 for _, arg in ipairs(args) do
@@ -49,8 +52,9 @@ local opts = {
     invert = false,
     max = 2.0,
     deadzone = 0.05,
-    stop_button = 1,
-    stop_debounce = 0.2,
+    stop_axis = "slider",
+    stop_below = -0.8,
+    resume_above = -0.5,
 }
 
 local function set_option(key, value)
@@ -85,8 +89,9 @@ end
 
 if opts.max <= 0 then error("max must be positive") end
 if opts.deadzone < 0 or opts.deadzone >= 1 then error("deadzone must be in 0..1") end
-if opts.stop_button < 1 then error("stop-button must be >= 1") end
-if opts.stop_debounce < 0 then error("stop-debounce must not be negative") end
+if opts.stop_below >= opts.resume_above then
+    error("stop-below must be lower than resume-above, otherwise the switch has no hysteresis")
+end
 
 local motor = Serial {
     framing = "line",
@@ -105,9 +110,7 @@ local answered = false
 local armed = false
 local target = 0.0
 local last_report = socket.gettime()
-local button_state = true
-local button_candidate = nil
-local button_since = 0.0
+local stop_state = nil
 
 local function command(line)
     log.info("> {}", line)
@@ -133,33 +136,18 @@ local function speed_of(axes)
     return (value < 0 and -1 or 1) * scaled * opts.max
 end
 
-local function pressed(buttons, wanted)
-    for _, button in ipairs(buttons) do
-        if button == wanted then return true end
-    end
-    return false
-end
-
----Debounced stop button: an RC channel can chatter around the firmware's
----threshold, and every accepted edge toggles the drive.
----@param down boolean raw state from this report
----@return boolean true only on a debounced press
-local function stop_pressed(down)
-    if down == button_state then
-        button_candidate = nil
-        return false
-    end
-    local now = socket.gettime()
-    if button_candidate ~= down then
-        button_candidate = down
-        button_since = now
-        return false
-    end
-    if now - button_since < opts.stop_debounce then return false end
-    button_state = down
-    button_candidate = nil
-    log.info("stop button {}", down and "pressed" or "released")
-    return down
+---Stop switch read from an axis. The two thresholds give hysteresis, so a
+---channel hovering at the edge cannot flap the drive; inside the band the
+---previous state is kept.
+---@param axes table<string, number>
+---@return boolean? true = stop, false = allowed, nil = disabled or inside the band
+local function stop_switch(axes)
+    if opts.stop_axis == "" then return nil end
+    local value = axes[opts.stop_axis]
+    if value == nil then return nil end
+    if value <= opts.stop_below then return true end
+    if value >= opts.resume_above then return false end
+    return nil
 end
 
 local function park()
@@ -179,8 +167,8 @@ local function arm()
     command("Q0")
     drive(0.0, true)
     armed = true
-    log.info("drive enabled: axis '{}' sets the wheel speed, +-{} m/s, stop button {}",
-        opts.axis, opts.max, opts.stop_button)
+    log.info("drive enabled: axis '{}' sets the wheel speed, +-{} m/s; stop when {} <= {}",
+        opts.axis, opts.max, opts.stop_axis, opts.stop_below)
 end
 
 pipe(motor, function(line)
@@ -197,9 +185,11 @@ end)
 pipe(joystick, function(msg)
     last_report = socket.gettime()
 
-    if stop_pressed(pressed(msg.buttons, opts.stop_button)) then
-        if armed then
-            log.warn("full stop: drive disabled, press button {} again to re-arm", opts.stop_button)
+    local stop = stop_switch(msg.axes)
+    if stop ~= nil and stop ~= stop_state then
+        stop_state = stop
+        if stop then
+            log.warn("stop switch engaged: drive parked, {} <= {}", opts.stop_axis, opts.stop_below)
             park()
         else
             arm()
@@ -260,4 +250,4 @@ if not answered then
     return
 end
 
-arm()
+log.info("waiting for the first joystick report to decide the drive state")
