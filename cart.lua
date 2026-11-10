@@ -29,12 +29,13 @@ local SIM           = os.getenv("GAZ_SIM") == "1" -- sim robot + sim lidar inste
 local NODE_ID       = 100       -- this Pi's Cyphal node id
 local WS_PORT       = 6080     -- config-GUI websocket (gui.lua connects here)
 local SERVICE_PORT  = 6081     -- diagnostic/control websocket (nodes/service.lua)
+local SEND_DEFAULTS = false    -- push config_defs defaults to every module at boot
 local TELEOP_MODE   = "auto"   -- "auto": joystick when it reports, else the GUI keyboard
 local TRACK_WIDTH   = 0.30     -- distance between left and right wheels, m
 local ODO_PERIOD_MS = 20       -- odometry integration period
 local TELEM_PERIOD_MS = 100    -- chart telemetry stream period
-local MAX_LIN_SPD  = 1       -- m/s at full forward command (v = 1.0)
-local MAX_ROT_SPD  = 2       -- rad/s at full turn command (omega = 1.0)
+local MAX_LIN_SPD  = 2       -- m/s at full forward command (v = 1.0)
+local MAX_ROT_SPD  = 3       -- rad/s at full turn command (omega = 1.0)
 local JOYSTICK     = "/dev/hidraw0"     -- hidraw node of the URCJ, e.g. "/dev/hidraw5"; nil = no joystick
 local SIM_START_X  = 0.5     -- initial sim robot x, m
 local SIM_START_Y  = 0.5     -- initial sim robot y, m
@@ -73,13 +74,9 @@ local PORT = {
     config       = 4100,  -- Pi -> module, { id, num, den }
 }
 
-local INITIAL_CONFIG = {
-    wheel_diameter = 0.3,
-    kp = 1.2,
-    ki = 3,
-    kd = 0.001,
-    i_limit = 3,
-}
+-- The values a wheel boots with are mods/config_defs.lua's defaults: the same
+-- numbers the GUI shows and the firmware compiles in, so there is one place to
+-- change a wheel parameter instead of three.
 
 -- ---- CAN + Cyphal ----------------------------------------------------------
 
@@ -256,18 +253,29 @@ local ws = WebsocketServer {
     protocol = "msgpack"
 }
 
+-- Push every runtime parameter over Cyphal using the shared defaults, lowest id
+-- first (the wheel diameter before the gains that are expressed against rad/s).
 local function send_initial_config()
-    set_config("all", config_defs.wheel_diameter.id, INITIAL_CONFIG.wheel_diameter)
-    set_config("all", config_defs.pid_kp.id, INITIAL_CONFIG.kp)
-    set_config("all", config_defs.pid_ki.id, INITIAL_CONFIG.ki)
-    set_config("all", config_defs.pid_kd.id, INITIAL_CONFIG.kd)
-    set_config("all", config_defs.pid_i_limit.id, INITIAL_CONFIG.i_limit)
+    local entries = {}
+    for _, def in pairs(config_defs) do
+        entries[#entries + 1] = def
+    end
+    table.sort(entries, function(a, b) return a.id < b.id end)
+    for _, def in ipairs(entries) do
+        set_config("all", def.id, def.default)
+    end
     direct_voltage("all", 0.0)
 end
 
-send_initial_config()
-
--- ---- Drive sources ---------------------------------------------------------
+-- Modules keep their own tuning in EEPROM, so a module that was already
+-- configured boots with what it was last tuned to; pushing the defaults here
+-- would silently undo that. SEND_DEFAULTS forces a known state for bring-up.
+if SEND_DEFAULTS then
+    send_initial_config()
+else
+    log.info("modules keep their stored tuning; SEND_DEFAULTS = false")
+    direct_voltage("all", 0.0)
+end
 -- Every source tags its commands with its own name so the arbiter can keep one
 -- of them in control; the accepted command is mirrored to the GUI's teleop tab,
 -- which therefore shows the joystick's twist just as it shows its own keys'.
