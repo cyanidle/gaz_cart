@@ -61,10 +61,11 @@ submodule, then bump the pointer in the parent repo.
 When working with the driver code, build with **`ninja -C build`** run from the
 `firmware/` subdirectory. The toolchain (`arm-none-eabi-gcc`) and the configured
 `build/` directory are already present. `VB_MOTOR_IMPL` picks the wheel
-controller: `sixstep` (default, libvoltbro six-step commutation + external
-velocity PID), `simplefoc` (hall FOC on the vendored Arduino-FOC tree) or
-`voltbro-foc` (libvoltbro FOC); all three sit behind
-`App/motor_backend.h` and expose the same Cyphal ports and config ids.
+controller: `simplefoc` (default, hall FOC with d/q current control over the
+board shunts on the vendored Arduino-FOC tree), `sixstep` (libvoltbro six-step
+commutation + external velocity PID) or `voltbro-foc` (libvoltbro FOC); all
+three sit behind `App/motor_backend.h` and expose the same Cyphal ports and
+config ids.
 
 ## Packaging
 
@@ -245,11 +246,39 @@ Cyphal remains the cart's control path; commands received here drive the same
   skipped); every reply ends with `\r\n`:
   `T<float>` target wheel speed (m/s), `Q<float>` open-loop voltage (V),
   `E<0|1>` driver enable, `X` zero both set-points, `M<rate>` telemetry rate in
-  Hz (0 = off, max 100), `S` one status line, `?` command list. Anything else
+  Hz (0 = off, max 100), `S` one status line, `K` loop-trace counters,
+  `W`/`W<0|1>` dump / arm the loop trace, `?` command list. Anything else
   answers `ERR <line>`.
 - Status and telemetry share one format: `S t=<m/s> v=<rad/s> e=<0|1> f=<FAULT>`,
   where `t` is the set-point last issued over this channel — a set-point sent
-  over Cyphal is not mirrored there.
+  over Cyphal is not mirrored there. Backends with a current measurement
+  (SimpleFOC's d/q loop) append ` i=<A>`, the measured q-axis current. With
+  `V1` the telemetry tick sends ` D t=... v=... sp=... iq=... id=... im=...
+  uq=... ud=... b=... n=... f=... e=...` instead (`App/serial_line.h` lists the
+  fields).
+- **Speed commands are clamped to what the rail can regulate.** `App/motor_limits.h`
+  derives the reachable wheel rate from the live modulation ceiling and the
+  drive's own EMF constant (`DriveInfo::torque_const * gear_ratio`, volts per
+  wheel rad/s) with the current loop's voltage floor as headroom, and the
+  `MotorBackend` façade holds the set-point it ramps towards there. Past the
+  ceiling the current loops have no voltage authority, the phase current is set
+  by the back-EMF instead, and on the bench that ended at the gate driver's own
+  latched fault. The same EMF constant now sizes the d/q current loops' voltage
+  limit (a fixed V per rad/s cap trailed the EMF and turned into a
+  speed-dependent brake, which is what made the speed loop hunt). A clamped
+  target reports `# simplefoc: target clamped, ceiling (m/s) <value>`.
+- **`App/loop_trace.h` is the bench black box.** The 100 Hz `D` line cannot show
+  why a drive stutters — a stutter is a few control periods long. The trace
+  keeps the last ~51 ms of loop state (angle error, tracked angle, wheel rate,
+  d/q and phase currents, d/q and bus voltages, raw Hall state, event bits) at
+  2.5 kHz in a 128-sample pre-trigger ring, plus counters for the events a
+  single six-step step cannot explain: Hall transitions (`hall_bad`), Hall
+  edges, rate samples outside the drive's EMF range (`rate_bad`), angle-tracker
+  snaps, guard trips, supply-derate entries, gate-driver faults and speed-target
+  clamps. `K` prints the counters, `W` dumps the ring, `W1` arms an automatic
+  dump on the next such event. A dump is ~12 kB and takes the link over for
+  about a second: it is emitted a few lines per poll pass into the 1 kB transmit
+  ring, and the telemetry waits until it is through.
 - Floats are formatted by hand: the link line uses `--specs=nano.specs` without
   `_printf_float`, so `%f` prints nothing on this target.
 - A line that overruns the buffer, or a burst that overruns the 128-byte RX
