@@ -273,12 +273,13 @@ Cyphal remains the cart's control path; commands received here drive the same
   d/q and phase currents, d/q and bus voltages, raw Hall state, event bits) at
   2.5 kHz in a 128-sample pre-trigger ring, plus counters for the events a
   single six-step step cannot explain: Hall transitions (`hall_bad`), Hall
-  edges, rate samples outside the drive's EMF range (`rate_bad`), angle-tracker
-  snaps, guard trips, supply-derate entries, gate-driver faults and speed-target
-  clamps. `K` prints the counters, `W` dumps the ring, `W1` arms an automatic
-  dump on the next such event. A dump is ~12 kB and takes the link over for
-  about a second: it is emitted a few lines per poll pass into the 1 kB transmit
-  ring, and the telemetry waits until it is through.
+  edges, rate samples outside the drive's EMF range (`rate_bad`), guard trips,
+  supply-derate entries, gate-driver faults and speed-target clamps. `K` prints
+  the counters,
+  `W` dumps the ring, `W1` arms an automatic dump on the next such event. A dump
+  is ~12 kB and takes the link over for about a second: it is emitted a few
+  lines per poll pass into the 1 kB transmit ring, and the telemetry waits until
+  it is through.
 - Floats are formatted by hand: the link line uses `--specs=nano.specs` without
   `_printf_float`, so `%f` prints nothing on this target.
 - A line that overruns the buffer, or a burst that overruns the 128-byte RX
