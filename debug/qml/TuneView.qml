@@ -11,6 +11,7 @@ Item {
     // connect): a normalized target of 1.0 commands this many m/s.
     property real maxSpeedMps: model.max_speed_mps ? model.max_speed_mps : 0.25
     property real maxVoltage: model.max_voltage ? model.max_voltage : 6.0
+    property real minVoltage: model.min_voltage ? model.min_voltage : -6.0
     property double chartTime: 0
     property double lastSample: 0
 
@@ -29,6 +30,7 @@ Item {
         model.ensure("status")
         model.ensure("max_speed_mps")
         model.ensure("max_voltage")
+        model.ensure("min_voltage")
     }
 
     function decimalsOf(step) {
@@ -310,7 +312,7 @@ Item {
                 id: voltSlider
                 objectName: "voltSlider"
                 Layout.fillWidth: true
-                from: -root.maxVoltage; to: root.maxVoltage
+                from: root.minVoltage; to: root.maxVoltage
                 stepSize: 0.05
                 value: 0
                 snapMode: Slider.SnapAlways
@@ -333,13 +335,66 @@ Item {
                 onAccepted: {
                     var v = parseFloat(text)
                     if (isNaN(v)) return
-                    voltSlider.value = Math.max(-root.maxVoltage, Math.min(root.maxVoltage, v))
+                    voltSlider.value = Math.max(root.minVoltage, Math.min(root.maxVoltage, v))
                     voltSlider.send()
                 }
             }
             Label {
                 text: "V"
                 Layout.preferredWidth: root.rowUnitWidth
+                color: "#888"
+            }
+        }
+
+        // ---- Voltage slider range ------------------------------------------
+        // The module's open-loop channel takes any voltage; what it can apply is
+        // bounded by the modulation ceiling (half the bus times the bootstrap
+        // headroom), so the useful range moves with the rail. Editable here
+        // instead of only on the command line (`vmax=`), and remembered in the
+        // sent-config state like the rest of the tuning.
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+
+            Label {
+                text: "Voltage range"
+                Layout.preferredWidth: root.rowLabelWidth
+                color: "#555"
+            }
+            TextField {
+                id: voltMinField
+                objectName: "voltMinField"
+                Layout.preferredWidth: root.rowFieldWidth
+                text: (-root.maxVoltage).toFixed(1)
+                selectByMouse: true
+                horizontalAlignment: TextInput.AlignHCenter
+                validator: DoubleValidator { bottom: -40.0; top: 0.0 }
+                onEditingFinished: {
+                    var v = parseFloat(text)
+                    if (isNaN(v)) { text = (-root.maxVoltage).toFixed(1); return }
+                    root.minVoltage = Math.min(0, Math.max(-40, v))
+                    text = root.minVoltage.toFixed(1)
+                }
+            }
+            TextField {
+                id: voltMaxField
+                objectName: "voltMaxField"
+                Layout.preferredWidth: root.rowFieldWidth
+                text: root.maxVoltage.toFixed(1)
+                selectByMouse: true
+                horizontalAlignment: TextInput.AlignHCenter
+                validator: DoubleValidator { bottom: 0.0; top: 40.0 }
+                onEditingFinished: {
+                    var v = parseFloat(text)
+                    if (isNaN(v)) { text = root.maxVoltage.toFixed(1); return }
+                    root.maxVoltage = Math.max(0, Math.min(40, v))
+                    text = root.maxVoltage.toFixed(1)
+                }
+            }
+            Label {
+                Layout.preferredWidth: root.rowUnitWidth
+                text: root.minVoltage.toFixed(1) + ".." + root.maxVoltage.toFixed(1) + " V"
+                elide: Text.ElideRight
                 color: "#888"
             }
         }

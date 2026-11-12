@@ -1,0 +1,47 @@
+# Direct-voltage hold — the periodic stutter.
+#
+# Holds an open-loop voltage (Q, no speed loop at all) and reports the counters
+# and the per-phase loop timing before and after. The reported stutter is very
+# regular on direct voltage, about once every five seconds, which is the same
+# rate the `slow=` counter shows for control periods over 2 ms — so this run is
+# there to catch one and to show which phase of the app loop absorbed it:
+#
+#   `K5 ph pid=.. update=.. poll=.. persist=.. cyphal=..` (worst since boot)
+#   vs `K4 loop slow=.. max_us=.. heap=.. heap_us=..`
+#
+#   python3 debug/bench.py script debug/bench_voltage_hold.txt
+#
+# Wheel must be free. Never against a powered cart.
+
+? 2
+> M10
+> V1
+> W1
+@ 0.3
+> K
+@ 0.5
+> E1
+@ 1.0
+
+# The hold the stutter was reported at. Long enough for several of them.
+> Q6
+? 40.0
+> K
+@ 0.5
+
+> Q-6
+? 20.0
+> K
+@ 0.5
+
+> Q0
+@ 3.0
+> K
+@ 0.5
+> M0
+> V0
+@ 0.5
+> E0
+@ 0.3
+> S
+@ 0.4

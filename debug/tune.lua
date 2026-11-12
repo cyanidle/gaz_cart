@@ -256,6 +256,7 @@ view {
     params = params,
     max_speed_mps = max_speed_m_s,
     max_voltage = opts.vmax,
+    min_voltage = -opts.vmax,
     status = "(connecting)",
 }
 
