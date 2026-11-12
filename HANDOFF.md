@@ -16,12 +16,13 @@ operation or speeds above its live electrical ceiling.
   maximum), motor phase cap 30 V. The live bus and 0.9 modulation headroom still
   apply. `Q10` needs at least about 22.3 V; at 18.5 V the applied q-voltage is
   about 8.3 V.
-- **Wheel/config:** live EEPROM wheel diameter is 0.32 m and full-scale speed is
-  0.5 m/s. The tuner and firmware defaults now use the validated SimpleFOC
-  tuning: Kp 2.1, Ki 1.11, Kd 0, velocity LPF 0.05 s, speed ramp 0.75 m/s²,
-  torque ramp 50 A/s, brake current 2.2 A. The sustained overcurrent guard stays
-  at 10 A / 250 ms because the host safety test rejects a threshold below the
-  drive's 8 A current ceiling.
+- **Wheel/config:** live EEPROM wheel diameter is 0.32 m. The compiled defaults
+  are full-scale speed 0.5 m/s and the validated SimpleFOC tuning (Kp 2.1,
+  Ki 1.11, Kd 0, velocity LPF 0.05 s, speed ramp 0.75 m/s², torque ramp 50 A/s,
+  brake current 2.2 A); the bench module's record now holds the values tuned in
+  the next bullet. The sustained overcurrent guard stays at 10 A / 250 ms
+  because the host safety test rejects a threshold below the drive's 8 A
+  current ceiling.
 - **Q10 bench range:** `debug/tune.lua` defaults to `vmax=10` and
   `debug/bench_voltage_hold.txt` holds `Q10` / `Q-10`.
 - **Serial identity:** `I` returns the full firmware Git commit (`-dirty` when
@@ -41,7 +42,8 @@ operation or speeds above its live electrical ceiling.
   velocity LPF (halves the full-scale jitter against 0.015 s without the
   voltage-limit episodes 0.05 s and 0.08 s produce), Kp 3.42 / Ki 2.69, ramp
   0.9 m/s², brake 3.1 A, wheel 0.32 m. Achieved 2.15 wheel rad/s (0.344 m/s,
-  1376 rotor rpm) both directions with `K1 bad=0`, no derate, no fault.
+  1314 rotor rpm at the 64:1 gearbox) both directions with `K1 bad=0`, no
+  derate, no fault.
 
 ## Bench evidence
 
@@ -82,23 +84,35 @@ Measured state is green: `ctest --test-dir firmware/tests/build` 7/7, Debug and
 Release both build, the cart-side Lua self-tests pass, and `mods/config_defs.lua`
 ids still match `App/config_ids.h` (C0..C16).
 
-1. **Max speed — the rail is the limit, and the missing 15 % is the modulation
-   scheme.** Measured 2026-11-12 (Release, wheel free, `Q` sweep):
-   `uq 2.0/4.0/6.0/8.0/8.30 V` give `0.663/1.383/2.085/2.748/2.845` wheel rad/s
-   — i.e. **0.455 m/s, 27 wheel rpm, 1738 rotor rpm** at the rail's full applied
-   voltage, dead steady (3.5 % spread over 128 samples). The chain is
-   `18.5 V → SinePWM phase limit Vdc/2 = 9.25 V → ×0.9 bootstrap headroom =
-   8.325 V → / 0.0456 V per rotor rad/s = 182 rad/s`. Effective EMF is
-   0.0456-0.0472 V per rotor rad/s (KV ≈ 210-220 rpm/V against a 230 nameplate),
-   so `ppairs=4`, `gear_ratio=64` and `torque_const=0.0478` all agree with the
-   measurement — there is no stray factor.
-   **A 2 k rpm target needs ~9.6 V applied.** The one software lever is
-   space-vector modulation: `Vdc/√3 × 0.9 = 10.68 × 0.9 = 9.6 V` — exactly
-   ~2000 rpm on this same rail (+15 % everywhere). That is a change in the
-   vendored Arduino-FOC PWM path (`foc_modulation = SinePWM`, see
-   `App/backends/motor_backend_simplefoc.cpp`) and needs the bootstrap-refresh
-   check that produced the 0.9 headroom in the first place. Otherwise a supply of
-   at least 21 V is needed. Left for a later session on purpose.
+1. **Max speed — the rail is the limit; two reservations sit on top of it.**
+   Measured 2026-11-12 (Release, wheel free, `Q` sweep): `uq 2.0/4.0/6.0/8.0/
+   8.30 V` give `0.663/1.383/2.085/2.748/2.845` wheel rad/s, i.e. **0.455 m/s,
+   27 wheel rpm, 1738 rotor rpm** at the rail's full applied voltage, dead steady
+   (3.5 % spread over 128 samples). The chain is `18.5 V → SinePWM phase limit
+   Vdc/2 = 9.25 V → ×0.9 bootstrap headroom = 8.325 V → / 0.0456 V per rotor
+   rad/s = 182 rad/s`. Effective EMF 0.0456-0.0472 V per rotor rad/s
+   (KV ≈ 210-220 rpm/V against a 230 nameplate), so `ppairs=4`,
+   `gear_ratio=64` and `torque_const=0.0478` all agree with the measurement —
+   there is no stray factor. What the numbers *do* hide is the software
+   reservation, and it is what to reason about before any modulation work:
+
+   | | modulation ceiling | open loop (no speed loop) | speed mode (cart, `C16` max) |
+   |---|---|---|---|
+   | SinePWM today | 8.325 V | 0.455 m/s, 1738 rpm | (8.325−1.6)/3.059 = 0.352 m/s, 1343 rpm |
+   | SVPWM (Vdc/√3) | 9.613 V | ~0.53 m/s, ~2010 rpm | (9.613−1.6)/3.059 = 0.419 m/s, 1601 rpm |
+
+   The ~23 % between the open-loop and speed-mode columns is
+   `simplefoc_current_loop_v_floor` (1.6 V of headroom so the current loops keep
+   authority over the phase current, `App/motor_limits.h`). Speed mode can never
+   use the whole applied voltage.
+
+   **2 k rpm in speed mode needs ~11.6 V applied**, i.e. a rail of ~22.3 V with
+   SVPWM or ~25.8 V with SinePWM; on this rail SVPWM alone buys 1601 rpm
+   (+19 % over today's 1343). Switching `foc_modulation = SinePWM` →
+   space-vector is a change in the vendored Arduino-FOC path
+   (`App/backends/motor_backend_simplefoc.cpp`) and has to re-clear the
+   bootstrap-refresh constraint that produced the 0.9 headroom. Left for a later
+   session on purpose; a ≥22 V supply is the other route.
 2. **Cyphal phase ~2.9 ms in Debug — bounded now, cause is codegen.** A pass can
    no longer drain 8 RX frames and the whole TX queue (`can_loop` serves one
    frame and one queue item), and `K5` now splits the phase into `can=`,
