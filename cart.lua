@@ -512,7 +512,9 @@ end
 
 -- ---- Service channel ---------------------------------------------------------
 -- A second websocket with the complete runtime state and every command, for
--- bench bring-up and remote diagnosis. The operator GUI never talks to it.
+-- bench bring-up and remote diagnosis. The operator GUI drives the cart over
+-- the control channel above; its tune window is the one client here, because
+-- this is the only channel that takes a single-wheel speed and a direct voltage.
 
 local service_ws = WebsocketServer {
     name = "service_ws",

@@ -2,7 +2,8 @@
 --  Service channel: a second websocket that exposes the cart's full runtime
 --  state and accepts every command the GUI can send. It exists for bring-up,
 --  bench debugging and remote diagnosis — the control GUI (port 6080) stays
---  what the operator uses.
+--  what the operator drives with, and only its tune window comes here for the
+--  single-wheel speed and direct-voltage commands this channel alone accepts.
 --
 --      radapter cart.lua can0            # cart
 --      radapter clients wrapped around ws://CART:6081
