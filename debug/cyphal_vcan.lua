@@ -14,6 +14,7 @@
 
 package.path = SCRIPT_DIR .. "/../?.lua;" .. package.path
 
+local socket      = require "socket"
 local config_defs = require "mods.config_defs"
 local Rational    = require "mods.rational"
 local odo_node    = require "nodes.odo"
@@ -153,11 +154,7 @@ end
 
 -- ---- the real odometry node on top of it ------------------------------------
 local telemetry = {}
-local max_v = 0.0
-local function model(msg)
-    telemetry[#telemetry + 1] = msg
-    if msg.odom and math.abs(msg.odom.v or 0.0) > max_v then max_v = math.abs(msg.odom.v) end
-end
+local function model(msg) telemetry[#telemetry + 1] = msg end
 
 local odo = odo_node {
     model = model,
@@ -176,6 +173,7 @@ local odo = odo_node {
 }
 
 -- ---- telemetry up ------------------------------------------------------------
+local t_start = socket.gettime()
 sleep(2000)
 print(("wheels reporting: %d travel / %d speed messages"):format(seen.trv, seen.spd))
 check(seen.trv > 100 and seen.spd > 100, "all four modules' travel + linear speed reach the cart")
@@ -184,12 +182,14 @@ check(wheel_travel.fl > 0.4, "wheel travel accumulates (fl)")
 
 local x, y, theta = odo:pose()
 local v, omega = odo:velocity()
-print(("odometry: x=%.3f y=%.3f theta=%.3f v=%.3f omega=%.3f"):format(x, y, theta, v, omega))
+local elapsed = socket.gettime() - t_start
+print(("odometry: x=%.3f y=%.3f theta=%.3f v=%.3f omega=%.3f over %.2f s")
+    :format(x, y, theta, v, omega, elapsed))
 check(x > 0.4 and math.abs(y) < 0.02 and math.abs(theta) < 0.05, "four equal wheels integrate to a straight line")
--- velocity is the last integration period's twist, and the modules publish at
--- 50 Hz while the node integrates every 20 ms, so half the periods see no new
--- travel: the peak is what has to match the wheel speed
-check(max_v > WHEEL_SPEED * 0.9, ("body forward velocity reaches the wheel speed (peak %.3f m/s)"):format(max_v))
+-- the per-period twist aliases against the 50 Hz stream (a period sees 0 or 2
+-- steps), so the integrated pose is what has to match the wheel speed
+check(math.abs(x / elapsed - WHEEL_SPEED) < 0.03,
+    ("the integrated pose advances at the wheel speed (%.3f m/s)"):format(x / elapsed))
 check(#telemetry > 5, "the odometry node streams telemetry")
 
 -- ---- telemetry down: the cart's command topics ------------------------------
