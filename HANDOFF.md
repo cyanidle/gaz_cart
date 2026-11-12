@@ -113,4 +113,4 @@ cart; the wheel must be free.
 
 For speeds above ~0.35 m/s or a true 10 V q-voltage, connect a supply of at
 least 22.3 V that can hold the load and sink or tolerate braking energy. The
-compiled 19 V / 17 V caps no longer prevent that test.
+compiled 60 V / 30 V caps no longer prevent that test.

@@ -36,7 +36,8 @@ tree dirty — every coherent step lands in a commit before you move on:
 - `mods/odometry.lua` — diff-drive odometry from per-wheel linear velocity.
 - `mods/config_defs.lua` — single source of truth for runtime-tunable config values,
   shared by `cart.lua` and `gui.lua`. **Keep the `id`s in sync with the
-  `ConfigId` enum in `firmware/App/app.cpp`.**
+  `ConfigId` enum in `firmware/App/config_ids.h`** (`tests/config_defs.lua`
+  checks the table against it).
 - `mods/drive_mux.lua` — arbiter every drive source goes through: the last source
   that commanded a non-zero twist owns the wheels, and the joystick stop organ
   gates all of them. `mods/joystick_axes.lua` — axis shaping (deadzone, inversion)
