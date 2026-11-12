@@ -21,23 +21,19 @@
 --  the same numbers as V-based gains instead.  A gain expressed per m/s would
 --  need a per-wheel-radius conversion the module does not do — see "CAN config
 --  coverage" in firmware/README.md.  The numbers are therefore gain-per-rad/s;
---  these defaults are the values the six-step cart was tuned against (the
---  SimpleFOC build compiles its own A-based defaults in motor_tuning.h, and a
---  wheel's EEPROM overrides both until edited here).
+--  These defaults track the SimpleFOC bench tuning in motor_tuning.h; a
+--  wheel's EEPROM overrides them until edited here.
 --
 --  The wheel-diameter default mirrors the compiled-in `BOOT_WHEEL_RADIUS_M * 2`
---  in firmware/App/app.cpp. The PID defaults above are the six-step bench
---  values, so they do NOT track `motor_tuning::default_velocity_pid_config()`
---  of the SimpleFOC build — a factory-fresh SimpleFOC module reports its own
---  A-based gains until this table is sent to it.
+--  in firmware/App/app.cpp.
 -- =============================================================================
 
 return {
     wheel_diameter = { id = 0, label = "Wheel diameter", unit = "m",            default = 0.32, min = 0.01, max = 1.0, step = 0.005 },
-    pid_kp         = { id = 1, label = "Velocity Kp",     unit = "A/(rad/s)",   default = 0.50, min = 0.0,  max = 50,  step = 0.01 },
-    pid_ki         = { id = 2, label = "Velocity Ki",     unit = "A/(rad/s·s)", default = 0.10, min = 0.0,  max = 50,  step = 0.01 },
+    pid_kp         = { id = 1, label = "Velocity Kp",     unit = "A/(rad/s)",   default = 2.10, min = 0.0,  max = 50,  step = 0.01 },
+    pid_ki         = { id = 2, label = "Velocity Ki",     unit = "A/(rad/s·s)", default = 1.11, min = 0.0,  max = 50,  step = 0.01 },
     pid_kd         = { id = 3, label = "Velocity Kd",     unit = "A·s/(rad/s)", default = 0.00, min = 0.0,  max = 50,  step = 0.01 },
-    pid_i_limit    = { id = 4, label = "Integral limit",  unit = "A",           default = 10.0, min = 0.0,  max = 24,  step = 0.1  },
+    pid_i_limit    = { id = 4, label = "Integral limit",  unit = "A",           default = 7.3,  min = 0.0,  max = 24,  step = 0.1  },
 
     -- Current guard (overcurrent / stall protection). The overcurrent ids
     -- (5..8) apply to every backend that measures phase current (six-step and
@@ -45,13 +41,13 @@ return {
     -- (9..11) only take effect on the SimpleFOC build — the six-step keeps its
     -- hall-progress watchdog, which the guard's stall timer would pre-empt.
     -- A stall window of 0 disables the stall check. These values are persisted
-    -- in the module EEPROM (config record version 4).
+    -- in the module EEPROM (config record version 5).
     oc_peak_a      = { id = 5,  label = "OC peak level",    unit = "A",     default = 14,   min = 1,    max = 40,   step = 0.5 },
     oc_peak_ms     = { id = 6,  label = "OC peak window",   unit = "ms",    default = 25,   min = 0,    max = 1000, step = 5    },
     oc_sustain_a   = { id = 7,  label = "OC sustain level", unit = "A",     default = 10,   min = 1,    max = 40,   step = 0.5 },
     oc_sustain_ms  = { id = 8,  label = "OC sustain window",unit = "ms",    default = 250,  min = 0,    max = 5000, step = 10   },
     stall_current  = { id = 9,  label = "Stall current",    unit = "A",     default = 2,    min = 0.1,  max = 20,   step = 0.1  },
-    stall_speed    = { id = 10, label = "Stall speed",      unit = "rad/s", default = 0.05, min = 0.01, max = 5,    step = 0.01 },
+    stall_speed    = { id = 10, label = "Stall speed",      unit = "rad/s", default = 0.11, min = 0.01, max = 5,    step = 0.01 },
     stall_ms       = { id = 11, label = "Stall window",     unit = "ms",    default = 600,  min = 0,    max = 5000, step = 50   },
 
     -- Loop-shaping knobs of the SimpleFOC backend (ids 12..15; a backend
@@ -62,18 +58,17 @@ return {
     -- brake current (15) is the ceiling for a torque that opposes the measured
     -- rotation — the regen limit on a supply that cannot sink it, where 0
     -- leaves a moving wheel to coast. These are persisted in the module EEPROM
-    -- (config record version 4) like the ids above.
-    vel_lpf        = { id = 12, label = "Velocity LPF",  unit = "s",    default = 0.1,  min = 0.0,  max = 1,    step = 0.005 },
-    speed_ramp     = { id = 13, label = "Speed ramp",    unit = "m/s²", default = 2.0,  min = 0.05, max = 100,  step = 0.05 },
+    -- (config record version 5) like the ids above.
+    vel_lpf        = { id = 12, label = "Velocity LPF",  unit = "s",    default = 0.05, min = 0.0,  max = 1,    step = 0.005 },
+    speed_ramp     = { id = 13, label = "Speed ramp",    unit = "m/s²", default = 0.75, min = 0.05, max = 100,  step = 0.05 },
     torque_ramp    = { id = 14, label = "Torque ramp",   unit = "A/s",  default = 50,   min = 1,    max = 1000, step = 1    },
-    brake_current  = { id = 15, label = "Brake current", unit = "A",    default = 1.0,  min = 0,    max = 8,    step = 0.1  },
+    brake_current  = { id = 15, label = "Brake current", unit = "A",    default = 2.2,  min = 0,    max = 8,    step = 0.1  },
 
     -- Full-scale wheel speed (id 16): every speed command is normalized, -1..1,
     -- and the module scales it with this value. The unit is m/s at the wheel;
-    -- the default is the speed a module regulates on its nominal rail (the
-    -- firmware derives its own boot value from the drive's EMF constant and the
-    -- live modulation ceiling, and a stored EEPROM value or this table lower it
-    -- further). A command cannot exceed it: the module clamps, so the cart
+    -- The firmware derives its boot value from the drive's EMF constant and the
+    -- live modulation ceiling; a stored EEPROM value or this table sets the
+    -- command span. A command cannot exceed the live ceiling: the module clamps, so the cart
     -- cannot ask for a speed the drive has no voltage to regulate.
-    max_speed      = { id = 16, label = "Max wheel speed", unit = "m/s", default = 0.25, min = 0.01, max = 2.0, step = 0.005 },
+    max_speed      = { id = 16, label = "Max wheel speed", unit = "m/s", default = 0.50, min = 0.01, max = 2.0, step = 0.005 },
 }
