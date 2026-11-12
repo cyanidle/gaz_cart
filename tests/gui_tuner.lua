@@ -7,8 +7,9 @@
 -- Covers what the tuner must do over CAN: the service-channel handshake, the
 -- per-wheel state snapshot reaching the view, the message shapes for a wheel
 -- speed, an open-loop voltage and a config write, the wheel selector (switching
--- parks the wheel it leaves), and the hover help on every parameter row
--- (mods/tuner_help.lua text + a sketch). Screenshots go to $TUNER_SHOT_DIR.
+-- parks the wheel it leaves), and the hover help on every parameter name
+-- (mods/tuner_help.lua text + a sketch that follows the value, while the slider
+-- and the value field stay popup-free). Screenshots go to $TUNER_SHOT_DIR.
 
 local REPO = SCRIPT_DIR .. "/.."
 local PORT = 16081
@@ -92,7 +93,7 @@ assert(qt:prop("tuneWheelBox", "count") == 4, "the wheel selector does not list 
 assert(qt:prop("tuneWheelBox", "currentIndex") == 0, "the wheel selector does not start on fl")
 assert(tostring(qt:prop("tuneWheelBox", "currentText")) == "fl", "the wheel selector does not read fl")
 
--- ---- hover help on the parameter rows ---------------------------------------
+-- ---- hover help on the parameter names --------------------------------------
 local function hover(name)
     local c = qt:center(name)
     assert(c and #c == 2, "no such row: " .. name)
@@ -110,6 +111,19 @@ for _, key in ipairs({ "pid_kp", "pid_ki", "max_speed", "wheel_diameter", "oc_pe
     assert(text == tuner_help.params[key].what, "hover help drifted for " .. key)
     assert(qt:find("helpSketch"), "the help sketch is missing for " .. key)
     seen[text] = true
+    qt:move(5, 5)
+    qt:wait(120)
+end
+
+-- the help belongs to the name only: the slider and the value field are for
+-- using the knob and must not pop the explanation over them
+for _, part in ipairs({ "param_pid_kp", "paramfield_pid_kp" }) do
+    local c = qt:center(part)
+    qt:move(c[1], c[2])
+    qt:wait(150)
+    qt:move(c[1] + 1, c[2])
+    qt:wait(250)
+    assert(not qt:find("helpText"), "hovering " .. part .. " opened the help popup")
     qt:move(5, 5)
     qt:wait(120)
 end

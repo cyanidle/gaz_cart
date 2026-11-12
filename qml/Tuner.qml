@@ -7,8 +7,9 @@ import QtCharts 2.3
 //   serial  a module over USART2 — per-phase diagnostics, read-back, enable
 //   can     the cart's service channel — per-wheel target/actual speed only
 //
-// The parameter rows carry hover help (qml/ParamHelp.qml): hovering a row shows
-// what that knob does and a small sketch of the effect at its current value.
+// The parameter rows carry hover help (qml/ParamHelp.qml): hovering a
+// parameter's name shows what that knob does and a small sketch of the effect at
+// its current value.
 Item {
     id: root
 
@@ -505,27 +506,29 @@ Item {
                         Layout.fillWidth: true
                         spacing: 8
 
-                        // Hover anywhere on the row (label, slider, field) to see
-                        // what the parameter does and how the value shapes it.
-                        HoverHandler {
-                            id: paramHover
-                            onHoveredChanged: {
-                                if (hovered) {
-                                    help.param = modelData
-                                    help.open()
-                                } else {
-                                    help.close()
-                                }
-                            }
-                        }
-
                         Label {
                             objectName: "paramlabel_" + modelData.key
                             text: modelData.label
                             Layout.preferredWidth: root.rowLabelWidth
                             color: paramHover.hovered ? "#2c7fb8" : "#333"
                             font.underline: paramHover.hovered
+
+                            // Only the name carries the help: the slider and the
+                            // value field beside it are for using the knob, not
+                            // for reading about it.
+                            HoverHandler {
+                                id: paramHover
+                                onHoveredChanged: {
+                                    if (hovered) {
+                                        help.param = modelData
+                                        help.open()
+                                    } else {
+                                        help.close()
+                                    }
+                                }
+                            }
                         }
+
                         Slider {
                             id: paramSlider
                             objectName: "param_" + modelData.key
