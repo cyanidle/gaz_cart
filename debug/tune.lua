@@ -12,7 +12,8 @@
 --  Sliders for every runtime-config parameter (mods/config_defs.lua ids, the
 --  same ids the CAN config topic uses), hover help that sketches what each one
 --  does (mods/tuner_help.lua), live charts of the `V1` diagnostics line (speed
---  target vs actual, q currents, q voltage and the bus), a NORMALIZED
+--  target vs actual, the q and d voltages, the q and phase currents and the
+--  bus), a NORMALIZED
 --  target-speed slider (-1..1 of the module's full-scale wheel speed, config
 --  id 16) and an open-loop-voltage slider, with a Reset that zeroes both
 --  without touching the parameters, and the enable / zero / calibrate commands.

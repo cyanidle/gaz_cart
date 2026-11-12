@@ -66,6 +66,8 @@ local function last_action_since(mark, action)
     return found
 end
 
+local mark = 0
+
 qt:wait(2500)
 assert(qt:find("paramrow_pid_kp"), "the tuner window has no parameter rows")
 assert(qt:find("paramrow_wheel_diameter"), "the tuner window has no parameter rows")
@@ -78,7 +80,6 @@ assert(telemetry:find("0.200") or telemetry:find("0.18"),
 
 -- ---- the joystick stop organ is reported ------------------------------------
 stop_engaged = true
-mark = #received
 qt:click_item("resetBtn") -- any command makes the fake cart publish a snapshot
 qt:wait(400)
 local stopped_text = tostring(qt:prop("telemetryLabel", "text"))

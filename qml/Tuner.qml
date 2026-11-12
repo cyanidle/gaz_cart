@@ -158,7 +158,12 @@ Item {
             Item { Layout.fillWidth: true }
             Label {
                 objectName: "fullScaleLabel"
-                text: root.maxSpeedMps.toFixed(3) + " m/s at 1.0 (config id 16)"
+                // On serial this is the module's own read-back of config id 16,
+                // so writing that id keeps the hint honest. Over CAN the cart
+                // maps a normalized wheel command with its own constant and
+                // nothing is read back, so the hint names the cart scale.
+                text: root.maxSpeedMps.toFixed(3) + " m/s at 1.0 "
+                    + (root.transport === "serial" ? "(config id 16)" : "(cart full scale)")
                 color: "#888"
                 font.pixelSize: 11
             }

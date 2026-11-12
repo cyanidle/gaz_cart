@@ -52,7 +52,8 @@ local function set_option(key, value)
         error(("unknown option '%s'; run with the argument 'help' to list them"):format(key))
     end
     if kind == "flag" then
-        opts[key] = value == nil or (value ~= "0" and value ~= "false")
+        -- `arg:match` always yields a string here, so only "0"/"false" turn it off
+        opts[key] = value ~= "0" and value ~= "false"
     else
         assert(value and value ~= "", ("%s expects a value"):format(key))
         opts[key] = value

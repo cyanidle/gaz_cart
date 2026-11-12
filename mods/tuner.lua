@@ -14,13 +14,16 @@
 --
 --  View contract (qml/Tuner.qml reads these model keys):
 --    params          array ordered by config id, each with its hover help
---    max_speed_mps   full scale a normalized 1.0 means (config id 16)
---    wheel_diameter_m, max_voltage, min_voltage, wheel, transport
+--    max_speed_mps   full scale a normalized 1.0 means: read back from the
+--                    module (config id 16) on serial, the cart's own constant
+--                    on CAN, where nothing is read back
+--    wheel_diameter_m, max_voltage, min_voltage, wheel, wheels, transport
 --    diagnostics     true when per-phase telemetry exists (serial only)
 --    can_enable      true when the bridge enable can be commanded (serial)
 --    readback        true when the values shown were read from the module
 --    status          one line of text for the bottom bar
---    diag            { tgt_m_s, act_m_s, iq, uq, bus } — the latest sample
+--    diag            { tgt_m_s, act_m_s, iq, uq, ud, im, bus, t_ms } — latest
+--                    sample; ud/im/t_ms only exist on the `V1` serial line
 -- =============================================================================
 
 local config_defs = require "mods.config_defs"
@@ -163,6 +166,10 @@ end
 
 ---Commands the view sends; the transport decides how each one travels.
 function Tuner:_on_view(msg)
+    if self.inert and not msg.park then
+        self:_status("nothing is attached — " .. tostring(self.port) .. " never answered")
+        return nil
+    end
     if msg.set then
         self:_set_value(msg.set.id, msg.set.value)
         self:_send_config(msg.set.id, msg.set.value)
@@ -217,6 +224,7 @@ function Tuner:_open_serial(opts)
         baud = 115200,
     }
     self.motor = motor
+    self.port = opts.port
 
     local log_file = opts.log_file and io.open(opts.log_file, "a")
 
@@ -238,7 +246,10 @@ function Tuner:_open_serial(opts)
     end
     if not answered then
         log.error("{} did not answer an S probe; check the port and the board", opts.port)
-        self:_status("no answer on " .. tostring(opts.port))
+        -- the channel never came up: the window stays, but nothing is sent into
+        -- a link that has shown it cannot carry a command
+        self.inert = true
+        self:_status("no answer on " .. tostring(opts.port) .. " — commands are disabled")
         return
     end
     motor("D0")
