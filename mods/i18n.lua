@@ -44,6 +44,14 @@ local TEXT = {
         en = "connected to {}",
         ru = "подключено к {}",
     },
+    status_connecting = {
+        en = "(connecting)",
+        ru = "(подключение)",
+    },
+    status_link = {
+        en = "link: {}",
+        ru = "канал: {}",
+    },
     status_wheel = {
         en = "wheel {}",
         ru = "колесо {}",
@@ -103,6 +111,7 @@ local TEXT = {
     fault_stalled = { en = "STALLED", ru = "застой" },
     fault_overcurrent = { en = "OVERCURRENT", ru = "переток" },
     fault_driver = { en = "DRIVER_FAULT", ru = "отказ драйвера" },
+    fault_unknown = { en = "UNKNOWN (code {})", ru = "неизвестный код {}" },
 
     map_load_failed = { en = "Load failed: {}", ru = "Не удалось загрузить: {}" },
     map_uploading = { en = "Uploading {} …", ru = "Отправка {} …" },

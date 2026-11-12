@@ -91,5 +91,11 @@ if(NOT CMAKE_CROSSCOMPILING AND TARGET radapter)
             COMMAND ${CMAKE_COMMAND} -E env QT_QPA_PLATFORM=offscreen
                 $<TARGET_FILE:radapter> --gui ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_tuner.lua)
         set_tests_properties(gui_tuner PROPERTIES TIMEOUT 120)
+        # The config window's wheel selection: "all" is a protocol word and must
+        # reach the wire untranslated, whatever the window's language.
+        add_test(NAME gui_config
+            COMMAND ${CMAKE_COMMAND} -E env QT_QPA_PLATFORM=offscreen
+                $<TARGET_FILE:radapter> --gui ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_config.lua)
+        set_tests_properties(gui_config PROPERTIES TIMEOUT 120)
     endif()
 endif()

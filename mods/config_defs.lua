@@ -32,9 +32,8 @@
 -- =============================================================================
 
 return {
-    -- `label`/`unit` are the English texts; `label_ru`/`unit_ru` are what the GUI
-    -- shows when its language tumbler is on Russian (the default). mods/i18n.lua
-    -- picks; tests/tuner_help.lua fails when a Russian text is missing.
+    -- Every entry carries the English `label`/`unit` and the Russian
+    -- `label_ru`/`unit_ru` that tests/tuner_help.lua requires.
     wheel_diameter = {
         id = 0, label = "Wheel diameter", label_ru = "Диаметр колеса",
         unit = "m", unit_ru = "м",

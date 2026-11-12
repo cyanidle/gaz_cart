@@ -103,7 +103,8 @@ function Tuner.new(opts)
         diagnostics = self.transport == "serial",
         can_enable = self.transport == "serial",
         readback = self.transport == "serial",
-        status = "(connecting)",
+        status = i18n.text("status_connecting"),
+        lang = i18n.lang,
     }
 
     if self.transport == "serial" then
@@ -167,7 +168,7 @@ function Tuner:set_lang(lang)
         if values[param.id] ~= nil then param.value = values[param.id] end
         self.by_id[param.id] = param
     end
-    self.view { params = self.params }
+    self.view { params = self.params, lang = i18n.lang }
     log.info("tuner: language {}", i18n.lang)
     if self.on_lang then self.on_lang(i18n.lang) end
 end
@@ -189,6 +190,12 @@ end
 
 ---Commands the view sends; the transport decides how each one travels.
 function Tuner:_on_view(msg)
+    -- a language throw is a local UI choice: it must work even when the link
+    -- never came up, otherwise the window would be half translated
+    if msg.lang ~= nil then
+        self:set_lang(msg.lang)
+        return nil
+    end
     if self.inert and not msg.park then
         self:_status(i18n.fmt("status_nothing_attached", tostring(self.port)))
         return nil
@@ -196,8 +203,6 @@ function Tuner:_on_view(msg)
     if msg.set then
         self:_set_value(msg.set.id, msg.set.value)
         self:_send_config(msg.set.id, msg.set.value)
-    elseif msg.lang ~= nil then
-        self:set_lang(msg.lang)
     elseif msg.wheel ~= nil then
         self:_select_wheel(msg.wheel)
     elseif msg.target ~= nil then
@@ -305,7 +310,10 @@ function Tuner:_on_serial_line(line)
                 bus = fields.b, t_ms = fields.n,
             },
         }
-        local fault = i18n.text(FAULT_NAMES[math.floor((fields.f or 0) + 0.5) + 1] or "fault_none")
+        local fault_index = math.floor((fields.f or 0) + 0.5) + 1
+        local fault_key = FAULT_NAMES[fault_index]
+        local fault = fault_key and i18n.text(fault_key)
+            or i18n.fmt("fault_unknown", tostring(fields.f))
         self:_status(i18n.fmt("diag_v1",
             fields.v or 0.0, fields.iq or 0.0, fields.b or 0.0, fault,
             i18n.text(fields.e == 1 and "driver_on" or "driver_off")))
@@ -432,7 +440,7 @@ function Tuner:_open_can(opts)
             self:_status(i18n.fmt("status_connected", url))
             self.client { action = "state" }
         else
-            self:_status(tostring(ev.state or ev))
+            self:_status(i18n.fmt("status_link", tostring(ev.state or ev)))
         end
     end)
 

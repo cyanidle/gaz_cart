@@ -55,14 +55,18 @@ tree dirty — every coherent step lands in a commit before you move on:
 - Localization — one tumbler (`qml/LangSwitch.qml`) switches the whole GUI
   between **Russian (default, not persisted)** and English, in every open window
   at once. Chrome text lives in the QML singleton `qml/Tr/Tr.qml`
-  (`Tr.t/tf/sourceName`) — a singleton rather than a per-window property because
-  radapter gives each window its own `QQmlEngine` but shares singletons. Model
-  text (parameter names and units, hover help, status lines, fault names)
-  travels through the GuiModel, so it is picked in Lua: `mods/i18n.lua` for the
-  status lines, `label_ru`/`unit_ru` beside every `mods/config_defs.lua` id,
-  `what = {en=…, ru=…}` in `mods/tuner_help.lua`, and `Tuner:set_lang` rebuilds
-  and re-pushes the parameter list. The tumbler sends `{lang=…}` to its view's
-  model; `gui.lua` routes it and **never forwards it to the cart**. A new
+  (`Tr.t/tf/sourceName`); a singleton rather than a per-window property because
+  radapter gives one `QQmlEngine` per Instance, shared by all its QML workers
+  (`radapter/src/workers/gui/gui.cpp`), so every window resolves the same
+  instance. Model text (parameter names and units, hover help, status lines,
+  fault names) travels through the GuiModel, so it is picked in Lua:
+  `mods/i18n.lua` for the status lines, `label_ru`/`unit_ru` beside every
+  `mods/config_defs.lua` id, `what = {en=…, ru=…}` in `mods/tuner_help.lua`, and
+  `Tuner:set_lang` rebuilds and re-pushes the parameter list. The tumbler sends
+  `{lang=…}` to its view's model; `gui.lua` routes it and **never forwards it to
+  the cart**, and the tuner accepts it even while `inert`. Protocol words are
+  never translated: `qml/WheelConfig.qml`'s wheel combos carry `id` + `name`, so
+  the `"all"` broadcast stays `"all"` on the wire (`tests/gui_config.lua`). A new
   user-visible string must be added in both languages or `tests/i18n.lua` (QML
   keys + call sites) / `tests/tuner_help.lua` fail.
 - `gui.lua` — config GUI; connects to `cart.lua`'s websocket from another host.

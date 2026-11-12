@@ -117,17 +117,37 @@ for _, lang in ipairs(i18n.langs) do
     for _, key in ipairs({
         "status_probing", "status_no_answer", "status_nothing_attached",
         "status_serial", "status_connected", "status_wheel", "status_service",
+        "status_connecting", "status_link",
         "status_readback_serial_only", "status_enable_cart", "status_console_serial",
         "status_one_module", "status_target", "status_stopped", "status_rejected",
         "diag_v1", "diag_status", "driver_on", "driver_off", "enabled", "disabled",
         "fault_none", "fault_invalid_hall", "fault_invalid_supply",
         "fault_invalid_command", "fault_stalled", "fault_overcurrent", "fault_driver",
+        "fault_unknown",
         "map_load_failed", "map_uploading", "map_saved", "map_save_failed",
         "map_requesting",
     }) do
         assert(#i18n.text(key) > 1, ("mods/i18n.lua: '%s' has no %s text"):format(key, lang))
         lua_texts = lua_texts + 1
     end
+end
+i18n.set("ru")
+
+-- a language throw is a UI choice, not a command: it must get through even when
+-- the tuner's link never came up, or the window would stay half translated
+local Tuner = require "mods.tuner"
+local pushed = {}
+local inert = setmetatable({
+    inert = true, port = "/dev/ttyNOPE", transport = "serial",
+    params = {}, by_id = {},
+    view = setmetatable({}, { __call = function(_, msg) pushed[#pushed + 1] = msg end }),
+}, Tuner)
+assert(inert:_on_view({ lang = "en" }) == nil,
+    "the tuner let the language throw fall through the inert guard")
+assert(i18n.lang == "en", "the tuner ignored a language throw while inert")
+for _, msg in ipairs(pushed) do
+    assert(msg.status == nil, "an inert tuner answered a language throw with a status line")
+    assert(msg.lang == "en", "the tuner did not hand the view the chosen language")
 end
 i18n.set("ru")
 

@@ -25,6 +25,11 @@ Item {
     property string transport: model.transport ? model.transport : "serial"
     property string wheel: model.wheel ? model.wheel : ""
 
+    // The model text is built by Lua in i18n.lang; the chrome must start in the
+    // same language, not always in the QML default.
+    property string modelLang: (model && model.lang !== undefined) ? model.lang : "ru"
+    onModelLangChanged: Tr.lang = modelLang
+
     property double chartTime: 0
     property double lastSample: 0
 
@@ -517,9 +522,6 @@ Item {
                             color: paramHover.hovered ? "#2c7fb8" : "#333"
                             font.underline: paramHover.hovered
 
-                            // Only the name carries the help: the slider and the
-                            // value field beside it are for using the knob, not
-                            // for reading about it.
                             HoverHandler {
                                 id: paramHover
                                 onHoveredChanged: {

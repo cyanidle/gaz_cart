@@ -3,6 +3,7 @@
 --  channel (USART2 / the ST-LINK VCP).
 --
 --      radapter --gui debug/tune.lua [port=/dev/ttyACM0] [vmax=10] [log=<file>]
+--                                     [lang=ru|en]
 --
 --  A thin launcher: the tuner itself is mods/tuner.lua and its window is
 --  qml/TunerWindow.qml, the same pair gui.lua hosts (there it defaults to the

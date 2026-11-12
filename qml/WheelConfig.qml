@@ -19,6 +19,27 @@ Item {
         model.ensure("odomText")
     }
 
+    // "all" is a protocol word, not a label: cart.lua broadcasts only for that
+    // literal, and the saved-config keys are "<wheel>:<id>". The combos carry the
+    // ids in `id` and show `name`, so the language never reaches the wire.
+    ListModel {
+        id: wheelChoices
+        Component.onCompleted: root.refreshWheelNames()
+    }
+    property string lang: Tr.lang
+    onLangChanged: refreshWheelNames()
+    function refreshWheelNames() {
+        var names = [Tr.t("wheel_all"), "fl", "fr", "rl", "rr"]
+        if (wheelChoices.count !== names.length) {
+            wheelChoices.clear()
+            for (var i = 0; i < names.length; i++) {
+                wheelChoices.append({ id: i === 0 ? "all" : names[i], name: names[i] })
+            }
+            return
+        }
+        for (var j = 0; j < names.length; j++) wheelChoices.setProperty(j, "name", names[j])
+    }
+
     // Feed new speed samples into the chart series at ~20 Hz.  Maintain a
     // 10 s rolling window: append the latest point to both series, advance
     // the time counter, then drop points older than the window.
@@ -150,7 +171,9 @@ Item {
             ComboBox {
                 id: tgtWheelBox
                 objectName: "tgtWheelBox"
-                model: [Tr.t("wheel_all"), "fl", "fr", "rl", "rr"]
+                model: wheelChoices
+                textRole: "name"
+                valueRole: "id"
                 Layout.preferredWidth: 60
             }
             TextField {
@@ -162,7 +185,7 @@ Item {
                 onAccepted: {
                     var v = parseFloat(text)
                     if (isNaN(v)) return
-                    model.send({ action: "set_speed", wheel: tgtWheelBox.currentText, value: v })
+                    model.send({ action: "set_speed", wheel: tgtWheelBox.currentValue, value: v })
                     statusLabel.text = Tr.tf("cfg_target_status",
                         [tgtWheelBox.currentText, v])
                 }
@@ -179,7 +202,9 @@ Item {
             ComboBox {
                 id: dirWheelBox
                 objectName: "dirWheelBox"
-                model: [Tr.t("wheel_all"), "fl", "fr", "rl", "rr"]
+                model: wheelChoices
+                textRole: "name"
+                valueRole: "id"
                 Layout.preferredWidth: 60
             }
             TextField {
@@ -191,7 +216,7 @@ Item {
                 onAccepted: {
                     var v = parseFloat(text)
                     if (isNaN(v)) return
-                    model.send({ action: "direct", wheel: dirWheelBox.currentText, value: v })
+                    model.send({ action: "direct", wheel: dirWheelBox.currentValue, value: v })
                     statusLabel.text = Tr.tf("cfg_direct_status",
                         [dirWheelBox.currentText, v])
                 }
@@ -215,7 +240,9 @@ Item {
                     ComboBox {
                         id: wheelBox
                         objectName: "wheelBox"
-                        model: [Tr.t("wheel_all"), "fl", "fr", "rl", "rr"]
+                        model: wheelChoices
+                        textRole: "name"
+                        valueRole: "id"
                         Layout.fillWidth: true
                     }
                 }
@@ -230,8 +257,6 @@ Item {
                         Label {
                             objectName: "cfgparam_" + modelData.key
                             text: modelData.label
-                            // Russian names run longer than the English ones;
-                            // the elide is only a safety net for a future string
                             Layout.preferredWidth: 200
                             elide: Text.ElideRight
                             color: "#333"
@@ -262,7 +287,7 @@ Item {
                                             statusLabel.text = Tr.tf("cfg_not_a_number", text)
                                             return
                                         }
-                                        root.model.send({ action: "config", wheel: wheelBox.currentText, id: modelData.id, value: v })
+                                        root.model.send({ action: "config", wheel: wheelBox.currentValue, id: modelData.id, value: v })
                                         statusLabel.text = Tr.tf("cfg_sent",
                                             [modelData.label, v, wheelBox.currentText])
                                     }
