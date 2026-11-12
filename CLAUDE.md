@@ -270,7 +270,9 @@ Cyphal remains the cart's control path; commands received here drive the same
   4000, `cart.lua`) sends -1..1 of the module's configured full-scale wheel
   speed (config id 16, `max_speed`, persisted in the EEPROM record version 5),
   and the module alone maps it to m/s — wheel radius, gearbox ratio, back-EMF
-  constant and modulation ceiling. A fresh module boots with the speed its own
+  constant and modulation ceiling. The façade keeps the last normalized value,
+  so editing config id 16 re-maps the stored command: lowering the full scale
+  slows a running drive without waiting for the source's next command. A fresh module boots with the speed its own
   rail can regulate (`App/motor_limits.h`) and the live ceiling still bounds
   whatever the configuration says, so no source can command a speed the drive
   has no voltage for. Telemetry, travel (odometry) and the cart's internal
