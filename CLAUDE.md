@@ -272,11 +272,12 @@ Cyphal remains the cart's control path; commands received here drive the same
   and the module alone maps it to m/s — wheel radius, gearbox ratio, back-EMF
   constant and modulation ceiling. The façade keeps the last normalized value,
   so editing config id 16 re-maps the stored command: lowering the full scale
-  slows a running drive without waiting for the source's next command. A fresh module boots with the speed its own
-  rail can regulate (`App/motor_limits.h`) and the live ceiling still bounds
-  whatever the configuration says, so no source can command a speed the drive
-  has no voltage for. Telemetry, travel (odometry) and the cart's internal
-  wheel-speed plumbing stay physical: m/s and m.
+  slows a running drive without waiting for the source's next command. A fresh
+  module boots with the speed its own rail can regulate (`App/motor_limits.h`)
+  and the live ceiling still bounds whatever the configuration says, so no
+  source can command a speed the drive has no voltage for. Telemetry, travel
+  (odometry) and the cart's internal wheel-speed plumbing stay physical: m/s
+  and m.
 - **Speed commands are clamped to what the rail can regulate.** `App/motor_limits.h`
   derives the reachable wheel rate from the live modulation ceiling and the
   drive's own EMF constant (`DriveInfo::torque_const * gear_ratio`, volts per

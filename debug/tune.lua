@@ -221,11 +221,13 @@ pipe(motor, function(line)
             local param_id, number = tonumber(id), tonumber(value)
             values[param_id] = number
             apply_derived(param_id, number)
-            -- Keep the model in step with what the module accepted, without
-            -- pushing the whole slider list back at a slider under the cursor.
+            -- Sliders move themselves when the operator drags them, so only a
+            -- value the module took differently from what it was sent (clamped,
+            -- or set from the terminal box) has to be pushed back.
             for _, p in ipairs(params) do
-                if p.id == param_id then
+                if p.id == param_id and math.abs(p.value - number) > 1e-9 then
                     p.value = number
+                    view { params = params }
                     break
                 end
             end
@@ -243,6 +245,14 @@ end)
 -- logged loudly instead of silently dropped.
 pipe(view, function(msg)
     if msg.set then
+        -- Assume the module takes what the slider said: its reply then matches
+        -- and the slider is not pushed back at a hand that is still dragging.
+        for _, p in ipairs(params) do
+            if p.id == msg.set.id then
+                p.value = msg.set.value
+                break
+            end
+        end
         command(("C%d:%s"):format(msg.set.id, msg.set.value))
     elseif msg.target ~= nil then
         -- Already normalized -1..1: the module maps it onto its full scale.
