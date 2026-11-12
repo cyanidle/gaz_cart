@@ -60,7 +60,13 @@ submodule, then bump the pointer in the parent repo.
 
 When working with the driver code, build with **`ninja -C build`** run from the
 `firmware/` subdirectory. The toolchain (`arm-none-eabi-gcc`) and the configured
-`build/` directory are already present. `VB_MOTOR_IMPL` picks the wheel
+`build/` directory are already present. Flash through the repository scripts:
+start `firmware/scripts/openocd.sh`, then run
+`python3 firmware/scripts/upload.py firmware/build/vbcore.elf` (an ELF carries
+its own load address; a BIN is written at `0x08000000`). The upload script waits
+for each OpenOCD command and verifies the image before resetting the target.
+
+`VB_MOTOR_IMPL` picks the wheel
 controller: `simplefoc` (default, hall FOC with d/q current control over the
 board shunts on the vendored Arduino-FOC tree), `sixstep` (libvoltbro six-step
 commutation + external velocity PID) or `voltbro-foc` (libvoltbro FOC); all
@@ -247,7 +253,8 @@ Cyphal remains the cart's control path; commands received here drive the same
   `T<float>` target wheel speed (-1..1 of the module's full-scale speed,
   clamped; `G16` reads that full scale back), `Q<float>` open-loop voltage (V),
   `E<0|1>` driver enable, `X` zero both set-points, `M<rate>` telemetry rate in
-  Hz (0 = off, max 100), `S` one status line, `K` the stop/limit counters,
+  Hz (0 = off, max 100), `S` one status line, `I` the firmware Git commit,
+  backend and basic config, `K` the stop/limit counters,
   `W`/`W<0|1>` dump / arm the loop trace, `?` command list. Anything else
   answers `ERR <line>`.
 - Status and telemetry share one format: `S t=<-1..1> v=<rad/s> e=<0|1> f=<FAULT>`,
