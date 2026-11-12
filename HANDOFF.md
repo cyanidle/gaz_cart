@@ -104,7 +104,10 @@ ids still match `App/config_ids.h` (C0..C16).
    The ~23 % between the open-loop and speed-mode columns is
    `simplefoc_current_loop_v_floor` (1.6 V of headroom so the current loops keep
    authority over the phase current, `App/motor_limits.h`). Speed mode can never
-   use the whole applied voltage.
+   use the whole applied voltage. (The open-loop column divides by the *measured*
+   EMF, 8.30 V / 2.845 rad/s = 2.918 V per wheel rad/s; the speed-mode and SVPWM
+   columns use the compiled `torque_const × 64 = 3.059`, so those two are ~5 %
+   pessimistic.)
 
    **2 k rpm in speed mode needs ~11.6 V applied**, i.e. a rail of ~22.3 V with
    SVPWM or ~25.8 V with SinePWM; on this rail SVPWM alone buys 1601 rpm
