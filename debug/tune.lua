@@ -164,6 +164,18 @@ local function read_back_params()
     end
 end
 
+-- Derived state a parameter change feeds directly: the m/s labels beside the
+-- normalized target slider are computed from the full-scale speed, so a C16
+-- write has to reach the view without waiting for a re-read of every slider.
+local function apply_derived(id, value)
+    if id == config_defs.wheel_diameter.id then
+        wheel_diameter_m = value
+    elseif id == config_defs.max_speed.id then
+        max_speed_m_s = value
+        view { max_speed_mps = value }
+    end
+end
+
 local function apply_read_back()
     local changed = false
     for _, p in ipairs(params) do
@@ -171,12 +183,7 @@ local function apply_read_back()
         if value ~= nil then
             p.value = value
             changed = true
-            if p.id == config_defs.wheel_diameter.id then
-                wheel_diameter_m = value
-            elseif p.id == config_defs.max_speed.id then
-                max_speed_m_s = value
-                view { max_speed_mps = value }
-            end
+            apply_derived(p.id, value)
         end
     end
     if changed then
@@ -211,7 +218,17 @@ pipe(motor, function(line)
     elseif line:match("^C%d+=") then
         local id, value = line:match("^C(%d+)=(%-?[%d.]+)")
         if id and value then
-            values[tonumber(id)] = tonumber(value)
+            local param_id, number = tonumber(id), tonumber(value)
+            values[param_id] = number
+            apply_derived(param_id, number)
+            -- Keep the model in step with what the module accepted, without
+            -- pushing the whole slider list back at a slider under the cursor.
+            for _, p in ipairs(params) do
+                if p.id == param_id then
+                    p.value = number
+                    break
+                end
+            end
         end
     elseif line:match("^# ") then
         log.info("< {}", line)

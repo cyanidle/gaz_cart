@@ -8,8 +8,9 @@ Item {
 
     property var model
     // The module's configured full-scale wheel speed (config id 16, read back on
-    // connect): a normalized target of 1.0 commands this many m/s.
-    property real maxSpeedMps: model.max_speed_mps ? model.max_speed_mps : 0.25
+    // connect and refreshed on every C16 write): a normalized target of 1.0
+    // commands this many m/s.
+    property real maxSpeedMps: model.max_speed_mps ? model.max_speed_mps : 0.5
     property real maxVoltage: model.max_voltage ? model.max_voltage : 6.0
     property real minVoltage: model.min_voltage ? model.min_voltage : -6.0
     property double chartTime: 0
