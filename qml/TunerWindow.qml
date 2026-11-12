@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import "Tr"
 
 // The tuner window — one view over both transports (mods/tuner.lua decides
 // which one): the cart's service channel over CAN, or a module on a serial bench
@@ -8,7 +9,7 @@ ApplicationWindow {
     id: root
     visible: true
     width: 1180; height: 980
-    title: "gaz_cart — tune"
+    title: Tr.t("window_tune")
     color: "#f0f0f0"
 
     Tuner {

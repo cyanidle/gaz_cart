@@ -20,8 +20,10 @@ else()
         bin/radapter bin/gaz-gui lib/libradapter-sdk.so
         share/gaz-gui/gui.lua share/gaz-gui/qml/WheelConfigWindow.qml
         share/gaz-gui/qml/TunerWindow.qml share/gaz-gui/qml/ParamHelp.qml
+        share/gaz-gui/qml/LangSwitch.qml share/gaz-gui/qml/Tr/qmldir
+        share/gaz-gui/qml/Tr/Tr.qml
         share/gaz-gui/mods/config_defs.lua share/gaz-gui/mods/tuner.lua
-        share/gaz-gui/mods/tuner_help.lua)
+        share/gaz-gui/mods/tuner_help.lua share/gaz-gui/mods/i18n.lua)
 endif()
 
 foreach(component IN LISTS components)

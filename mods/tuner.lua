@@ -28,6 +28,7 @@
 
 local config_defs = require "mods.config_defs"
 local tuner_help = require "mods.tuner_help"
+local i18n = require "mods.i18n"
 
 local MODULE_DIR = (debug.getinfo(1, "S").source:gsub("^@", "")):match("^(.*)[/\\][^/\\]*$")
 local REPO_DIR = MODULE_DIR .. "/.."
@@ -36,24 +37,25 @@ local Tuner = {}
 Tuner.__index = Tuner
 
 local FAULT_NAMES = {
-    "NONE", "INVALID_HALL", "INVALID_SUPPLY", "INVALID_COMMAND",
-    "STALLED", "OVERCURRENT", "DRIVER_FAULT",
+    "fault_none", "fault_invalid_hall", "fault_invalid_supply",
+    "fault_invalid_command", "fault_stalled", "fault_overcurrent", "fault_driver",
 }
 
 -- The service channel addresses one wheel of a four-module cart.
 local CAN_WHEELS = { "fl", "fr", "rl", "rr" }
 
----Parameters the tuner shows: config_defs plus the hover help.
+---Parameters the tuner shows: config_defs plus the hover help, in the active
+---language (mods/i18n.lua).
 ---@return table[] params ordered by id
 local function build_params()
     local params = {}
     for key, def in pairs(config_defs) do
         local help = assert(tuner_help.params[key], "no tuner help for config id " .. def.id)
         params[#params + 1] = {
-            key = key, id = def.id, label = def.label, unit = def.unit,
+            key = key, id = def.id, label = i18n.label(def), unit = i18n.unit(def),
             min = def.min, max = def.max, step = def.step,
             value = def.default,
-            help = { what = help.what, chart = help.chart, role = help.role },
+            help = { what = i18n.help(help), chart = help.chart, role = help.role },
         }
     end
     table.sort(params, function(a, b) return a.id < b.id end)
@@ -85,6 +87,7 @@ function Tuner.new(opts)
     self.max_speed_m_s = config_defs.max_speed.default
     self.wheel_diameter_m = config_defs.wheel_diameter.default
     self.on_config_sent = opts.on_config_sent
+    self.on_lang = opts.on_lang
 
     self.view = QML { url = opts.view or (REPO_DIR .. "/qml/TunerWindow.qml") }
 
@@ -133,7 +136,7 @@ end
 ---@param name string
 function Tuner:_select_wheel(name)
     if self.transport ~= "can" then
-        self:_status("the serial channel drives the one module it is attached to")
+        self:_status(i18n.text("status_one_module"))
         return
     end
     if not self:_is_wheel(name) then
@@ -145,8 +148,28 @@ function Tuner:_select_wheel(name)
     self:_send_voltage(0.0)
     self.wheel = name
     self.view { wheel = name }
-    self:_status("wheel " .. name)
+    self:_status(i18n.fmt("status_wheel", name))
     self.client { action = "state" }
+end
+
+---Switch the language of everything the model carries (parameter names, units,
+---hover help, status lines) and hand the view the re-labelled parameter list.
+---The window chrome switches inside QML, on the shared Tr singleton.
+---@param lang string "ru" or "en"
+function Tuner:set_lang(lang)
+    if lang == nil then return end
+    i18n.set(lang)
+    local values = {}
+    for _, param in ipairs(self.params) do values[param.id] = param.value end
+    self.params = build_params()
+    self.by_id = {}
+    for _, param in ipairs(self.params) do
+        if values[param.id] ~= nil then param.value = values[param.id] end
+        self.by_id[param.id] = param
+    end
+    self.view { params = self.params }
+    log.info("tuner: language {}", i18n.lang)
+    if self.on_lang then self.on_lang(i18n.lang) end
 end
 
 ---Track a value the operator set, without echoing the parameter list back: the
@@ -167,12 +190,14 @@ end
 ---Commands the view sends; the transport decides how each one travels.
 function Tuner:_on_view(msg)
     if self.inert and not msg.park then
-        self:_status("nothing is attached — " .. tostring(self.port) .. " never answered")
+        self:_status(i18n.fmt("status_nothing_attached", tostring(self.port)))
         return nil
     end
     if msg.set then
         self:_set_value(msg.set.id, msg.set.value)
         self:_send_config(msg.set.id, msg.set.value)
+    elseif msg.lang ~= nil then
+        self:set_lang(msg.lang)
     elseif msg.wheel ~= nil then
         self:_select_wheel(msg.wheel)
     elseif msg.target ~= nil then
@@ -236,7 +261,7 @@ function Tuner:_open_serial(opts)
         self:_on_serial_line(line)
     end)
 
-    self:_status("(probing " .. tostring(opts.port) .. " — the board answers ~10 s after a reset)")
+    self:_status(i18n.fmt("status_probing", tostring(opts.port)))
     local answered = false
     self.answered = function() answered = true end
     for _ = 1, 40 do
@@ -249,7 +274,7 @@ function Tuner:_open_serial(opts)
         -- the channel never came up: the window stays, but nothing is sent into
         -- a link that has shown it cannot carry a command
         self.inert = true
-        self:_status("no answer on " .. tostring(opts.port) .. " — commands are disabled")
+        self:_status(i18n.fmt("status_no_answer", tostring(opts.port)))
         return
     end
     motor("D0")
@@ -258,7 +283,7 @@ function Tuner:_open_serial(opts)
     self:_apply_read_back()
     motor("M71")
     motor("V1")
-    self:_status("serial " .. tostring(opts.port))
+    self:_status(i18n.fmt("status_serial", tostring(opts.port)))
 end
 
 function Tuner:_on_serial_line(line)
@@ -280,10 +305,10 @@ function Tuner:_on_serial_line(line)
                 bus = fields.b, t_ms = fields.n,
             },
         }
-        local fault = FAULT_NAMES[math.floor((fields.f or 0) + 0.5) + 1] or "?"
-        self:_status(fmt("v={:.2f} rad/s   i={:.2f} A   bus={:.1f} V   {}   driver {}",
+        local fault = i18n.text(FAULT_NAMES[math.floor((fields.f or 0) + 0.5) + 1] or "fault_none")
+        self:_status(i18n.fmt("diag_v1",
             fields.v or 0.0, fields.iq or 0.0, fields.b or 0.0, fault,
-            fields.e == 1 and "on" or "off"))
+            i18n.text(fields.e == 1 and "driver_on" or "driver_off")))
     elseif line:match("^S ") then
         if self.answered then self.answered() end
         local fields = {}
@@ -298,8 +323,9 @@ function Tuner:_on_serial_line(line)
                 iq = fields.i,
             },
         }
-        self:_status(fmt("t={:.3f}  v={:.2f} rad/s  {}",
-            fields.t or 0.0, fields.v or 0.0, fields.e == 1 and "enabled" or "disabled"))
+        self:_status(i18n.fmt("diag_status",
+            fields.t or 0.0, fields.v or 0.0,
+            i18n.text(fields.e == 1 and "enabled" or "disabled")))
     elseif line:match("^C%d+=") then
         local id, value = line:match("^C(%d+)=(%-?[%d.]+)")
         if id and value then
@@ -311,7 +337,7 @@ function Tuner:_on_serial_line(line)
         self:_status(line)
     elseif line:match("^ERR") then
         log.warn("< {}", line)
-        self:_status("rejected: " .. line)
+        self:_status(i18n.fmt("status_rejected", line))
     elseif line:match("^# ") then
         log.info("< {}", line)
     else
@@ -338,7 +364,7 @@ end
 
 function Tuner:_read_back()
     if self.transport ~= "serial" then
-        self:_status("the cart keeps its own record; read-back is a serial command")
+        self:_status(i18n.text("status_readback_serial_only"))
         return
     end
     self.values = {}
@@ -377,7 +403,7 @@ end
 
 function Tuner:_send_enable(on)
     if self.transport ~= "serial" then
-        self:_status("enable is owned by the cart; a wheel command energizes the module")
+        self:_status(i18n.text("status_enable_cart"))
         return
     end
     self.motor(on and "E1" or "E0")
@@ -385,7 +411,7 @@ end
 
 function Tuner:_terminal(line)
     if self.transport ~= "serial" then
-        self:_status("the console is a serial feature")
+        self:_status(i18n.text("status_console_serial"))
         return
     end
     self.motor(line)
@@ -403,7 +429,7 @@ function Tuner:_open_can(opts)
     pipe(self.client.events, function(ev)
         log.info("service ws {}: {}", url, ev)
         if ev.state == "ConnectedState" then
-            self:_status("connected to " .. url)
+            self:_status(i18n.fmt("status_connected", url))
             self.client { action = "state" }
         else
             self:_status(tostring(ev.state or ev))
@@ -420,16 +446,15 @@ function Tuner:_open_can(opts)
         local act = wheel.act or 0.0
         self.view {
             diag = { tgt_m_s = tgt, act_m_s = act },
-            status = fmt("{}: target {:.3f} m/s   actual {:.3f} m/s",
-                self.wheel, tgt, act),
+            status = i18n.fmt("status_target", self.wheel, tgt, act),
         }
         if state.joystick and state.joystick.stopped then
-            self.view { status = fmt("{}: stop organ engaged (cart parked)", self.wheel) }
+            self.view { status = i18n.fmt("status_stopped", self.wheel) }
         end
     end)
 
     self.client { action = "state" }
-    self:_status("service " .. url .. " (" .. self.wheel .. ")")
+    self:_status(i18n.fmt("status_service", url, self.wheel))
 end
 
 return Tuner

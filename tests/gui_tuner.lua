@@ -79,21 +79,7 @@ local telemetry = tostring(qt:prop("telemetryLabel", "text"))
 assert(telemetry:find("0.200") or telemetry:find("0.18"),
     "the per-wheel state snapshot did not reach the view: " .. telemetry)
 
--- ---- the joystick stop organ is reported ------------------------------------
-stop_engaged = true
-qt:click_item("resetBtn") -- any command makes the fake cart publish a snapshot
-qt:wait(400)
-local stopped_text = tostring(qt:prop("telemetryLabel", "text"))
-assert(stopped_text:find("stop organ"), "the tuner does not report an engaged stop organ: " .. stopped_text)
-stop_engaged = false
-qt:wait(200)
-
--- ---- wheel selector ----------------------------------------------------------
-assert(qt:prop("tuneWheelBox", "count") == 4, "the wheel selector does not list four wheels")
-assert(qt:prop("tuneWheelBox", "currentIndex") == 0, "the wheel selector does not start on fl")
-assert(tostring(qt:prop("tuneWheelBox", "currentText")) == "fl", "the wheel selector does not read fl")
-
--- ---- hover help on the parameter names --------------------------------------
+-- ---- language: Russian by default, one tumbler switches everything -----------
 local function hover(name)
     local c = qt:center(name)
     assert(c and #c == 2, "no such row: " .. name)
@@ -104,11 +90,58 @@ local function hover(name)
     return tostring(qt:prop("helpText", "text"))
 end
 
+local function text_of(name)
+    return tostring(qt:prop(name, "text"))
+end
+
+assert(text_of("paramlabel_pid_kp") == "Kp скорости",
+    "the parameter names are not Russian by default: " .. text_of("paramlabel_pid_kp"))
+assert(text_of("resetBtn") == "Сброс", "the window chrome is not Russian by default")
+assert(text_of("langLabel") == "Язык", "the language tumbler has no label")
+assert(text_of("langSwitch") == "РУ", "the tumbler does not show the active language")
+assert(hover("paramlabel_pid_kp") == tuner_help.params.pid_kp.what.ru,
+    "the hover help is not Russian by default")
+qt:move(5, 5)
+qt:wait(150)
+
+qt:click_item("langSwitch")
+qt:wait(600)
+assert(text_of("langSwitch") == "EN", "the tumbler does not show English after the switch")
+assert(text_of("langLabel") == "Language", "the tumbler label did not switch")
+assert(text_of("resetBtn") == "Reset", "the window chrome did not switch to English")
+assert(text_of("paramlabel_pid_kp") == "Velocity Kp",
+    "the parameter names did not follow the tumbler: " .. text_of("paramlabel_pid_kp"))
+assert(hover("paramlabel_pid_kp") == tuner_help.params.pid_kp.what.en,
+    "the hover help did not switch to English")
+qt:move(5, 5)
+qt:wait(150)
+
+qt:click_item("langSwitch")
+qt:wait(600)
+assert(text_of("resetBtn") == "Сброс", "the tumbler did not switch back to Russian")
+assert(text_of("paramlabel_pid_kp") == "Kp скорости", "the parameter names did not switch back")
+
+-- ---- the joystick stop organ is reported ------------------------------------
+stop_engaged = true
+qt:click_item("resetBtn") -- any command makes the fake cart publish a snapshot
+qt:wait(400)
+local stopped_text = tostring(qt:prop("telemetryLabel", "text"))
+assert(stopped_text:find("орган останова"),
+    "the tuner does not report an engaged stop organ: " .. stopped_text)
+stop_engaged = false
+qt:wait(200)
+
+-- ---- wheel selector ----------------------------------------------------------
+assert(qt:prop("tuneWheelBox", "count") == 4, "the wheel selector does not list four wheels")
+assert(qt:prop("tuneWheelBox", "currentIndex") == 0, "the wheel selector does not start on fl")
+assert(tostring(qt:prop("tuneWheelBox", "currentText")) == "fl", "the wheel selector does not read fl")
+
+-- ---- hover help on the parameter names --------------------------------------
 local seen = {}
 for _, key in ipairs({ "pid_kp", "pid_ki", "max_speed", "wheel_diameter", "oc_peak_a", "vel_lpf" }) do
     assert(qt:find("paramlabel_" .. key), "no row for parameter " .. key)
     local text = hover("paramlabel_" .. key)
-    assert(text == tuner_help.params[key].what, "hover help drifted for " .. key)
+    assert(text == tuner_help.params[key].what.ru, "hover help drifted for " .. key)
     assert(qt:find("helpSketch"), "the help sketch is missing for " .. key)
     seen[text] = true
     qt:move(5, 5)

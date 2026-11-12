@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "Tr"
 
 // Hover help for one tuner parameter: what the knob does, plus a small sketch
 // of that effect drawn from the parameter's current value. The sketch kinds
@@ -35,7 +36,7 @@ Popup {
 
     function helpTitle() {
         if (!param) return ""
-        return param.label + "  [" + param.unit + "]"
+        return Tr.tf("help_title", [param.label, param.unit])
     }
 
     contentItem: ColumnLayout {
@@ -144,9 +145,9 @@ Popup {
                 return Math.min(0.98, body + ring)
             }
             line(curve(f), fg, 2)
-            text(role === "kp" ? "overshoot grows with Kp"
-                : role === "ki" ? "integral: slower, winds up"
-                : "Kd damps the approach", x0 + 6, y1 + 2)
+            text(role === "kp" ? Tr.t("help_overshoot")
+                : role === "ki" ? Tr.t("help_integral")
+                : Tr.t("help_derivative"), x0 + 6, y1 + 2)
             break
         }
         case "smoothing": {
@@ -159,7 +160,7 @@ Popup {
             line(noise, grey, 1)
             var tau = 0.02 + 0.5 * t
             line(curve(function(u) { return 0.5 + 0.22 * Math.sin((u - tau) * 42) }), fg, 2)
-            text("filtered (smoother, " + (t * 100).toFixed(0) + "% of range)", x0 + 6, y1 + 2)
+            text(Tr.tf("help_filtered", (t * 100).toFixed(0)), x0 + 6, y1 + 2)
             break
         }
         case "slope": {
@@ -167,7 +168,7 @@ Popup {
             line([[x0, y0], [x0 + 8, y0], [x0 + 8, yAt(0.8)], [x1, yAt(0.8)]], grey, 1, true)
             var slope = 0.25 + 0.7 * (1 - t)
             line(curve(function(u) { return Math.min(0.8, Math.max(0, (u * slope) / 0.6)) }), fg, 2)
-            text("steeper = faster approach", x0 + 6, y1 + 2)
+            text(Tr.t("help_steeper"), x0 + 6, y1 + 2)
             break
         }
         case "level": {
@@ -178,7 +179,7 @@ Popup {
             })
             line(burst, grey, 1.5)
             line([[x0, yAt(level)], [x1, yAt(level)]], hot, 2, true)
-            text("trip level " + level.toFixed(2) + " of scale", x0 + 6, y1 + 2)
+            text(Tr.tf("help_trip_level", level.toFixed(2)), x0 + 6, y1 + 2)
             break
         }
         case "window": {
@@ -191,7 +192,7 @@ Popup {
                 return 0.12 + 0.72 * Math.exp(-Math.pow((u - 0.45) / 0.16, 2))
             }), grey, 1.5)
             line([[x0, yAt(trip)], [x1, yAt(trip)]], hot, 2, true)
-            text("window " + (t * 100).toFixed(0) + "% — must stay above the line", x0 + 6, y1 + 2)
+            text(Tr.tf("help_window", (t * 100).toFixed(0)), x0 + 6, y1 + 2)
             break
         }
         case "clamp": {
@@ -199,7 +200,7 @@ Popup {
             var ceil = 0.2 + 0.7 * t
             line(curve(function(u) { return u < 0.55 ? u * 1.25 : Math.min(ceil, u * 1.25) }), fg, 2)
             line([[x0, yAt(ceil)], [x1, yAt(ceil)]], hot, 2, true)
-            text("ceiling " + ceil.toFixed(2), x0 + 6, y1 + 2)
+            text(Tr.tf("help_ceiling", ceil.toFixed(2)), x0 + 6, y1 + 2)
             break
         }
         case "ceiling": {
@@ -212,8 +213,8 @@ Popup {
             ctx.fillRect(x0 + 12, yAt(0.92), 34, yAt(0.08) - yAt(0.92))
             ctx.fillStyle = "rgba(231,76,60,0.45)"
             ctx.fillRect(x0 + 60, mid, 34, (y0 - mid) * cap / 0.5)
-            text("driving", x0 + 12, y0 - 2)
-            text("braking ≤ " + (t * 100).toFixed(0) + "%", x0 + 60, y0 - 2)
+            text(Tr.t("help_driving"), x0 + 12, y0 - 2)
+            text(Tr.tf("help_braking", (t * 100).toFixed(0)), x0 + 60, y0 - 2)
             break
         }
         case "speed_threshold": {
@@ -223,7 +224,7 @@ Popup {
             ctx.fillRect(x0, yAt(thr), x1 - x0, y0 - yAt(thr))
             line(curve(function(u) { return 0.92 * Math.exp(-u * 2.6) }), fg, 2)
             line([[x0, yAt(thr)], [x1, yAt(thr)]], hot, 2, true)
-            text("stall zone below the line", x0 + 6, y1 + 2)
+            text(Tr.t("help_stall_zone"), x0 + 6, y1 + 2)
             break
         }
         case "scale": {
@@ -238,8 +239,8 @@ Popup {
                 text(ticks[k].toFixed(1), xk - 8, mid2 + 18)
             }
             var full = param && param.key === "max_speed" ? root.value : 0
-            text("1.0 = " + full.toFixed(3) + " m/s", x0 + 6, y1 + 2)
-            text("-1.0 = " + (-full).toFixed(3) + " m/s", x1 - 96, y1 + 2)
+            text(Tr.tf("help_full_pos", full.toFixed(3)), x0 + 6, y1 + 2)
+            text(Tr.tf("help_full_neg", (-full).toFixed(3)), x1 - 96, y1 + 2)
             break
         }
         case "geometry": {
@@ -251,12 +252,12 @@ Popup {
             ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke()
             ctx.beginPath(); ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy); ctx.stroke()
             var d = root.value
-            text("d = " + d.toFixed(3) + " m", x0 + 92, cy - 6)
-            text("circumference " + (Math.PI * d).toFixed(3) + " m per turn", x0 + 92, cy + 10)
+            text(Tr.tf("help_diameter", d.toFixed(3)), x0 + 92, cy - 6)
+            text(Tr.tf("help_circumference", (Math.PI * d).toFixed(3)), x0 + 92, cy + 10)
             break
         }
         default:
-            text("(no sketch for '" + kind + "')", x0 + 6, y1 + 2)
+            text(Tr.tf("help_no_sketch", kind), x0 + 6, y1 + 2)
         }
     }
 }

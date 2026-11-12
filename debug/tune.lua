@@ -27,10 +27,13 @@
 
 local USAGE = [[
 usage: radapter --gui debug/tune.lua [port=/dev/ttyACM0] [vmax=10] [log=<file>]
+                                         [lang=ru|en]
 
   port    module's serial bench channel (USART2)
   vmax    direct-voltage slider range, V
   log     append every line the module sends to this file
+  lang    UI language; Russian is the default, and every window carries a
+          tumbler that switches all of them
 
 The target-speed slider is normalized: -1..1 of the module's full-scale wheel
 speed (config id 16), which the GUI reads back on connect and shows in m/s.
@@ -42,6 +45,7 @@ local opts = {
     port = "/dev/ttyACM0",
     vmax = 10.0,
     log = nil,
+    lang = nil,   -- nil keeps mods/i18n.lua's default (Russian)
 }
 
 local function set_option(key, value)
@@ -55,6 +59,8 @@ local function set_option(key, value)
         opts.port = assert(value, "port expects a device node")
     elseif key == "log" then
         opts.log = assert(value, "log expects a file name")
+    elseif key == "lang" then
+        opts.lang = assert(value, "lang expects ru or en")
     else
         error(("unknown option '%s'; run with the word 'help' to list them"):format(key))
     end
@@ -77,6 +83,8 @@ end
 if opts.vmax <= 0 then error("vmax must be positive") end
 
 package.path = SCRIPT_DIR .. "/../?.lua;" .. package.path
+
+if opts.lang then require("mods.i18n").set(opts.lang) end
 
 local tuner = require("mods.tuner").new {
     transport = "serial",

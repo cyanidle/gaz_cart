@@ -20,6 +20,7 @@
 -- =============================================================================
 
 local config_defs = require "mods.config_defs"
+local i18n        = require "mods.i18n"
 local tuner_mod   = require "mods.tuner"
 
 -- ---- Command line ------------------------------------------------------------
@@ -150,19 +151,74 @@ local cfgView    = QML { url = "./qml/WheelConfigWindow.qml" }
 local navView    = QML { url = "./qml/NavWindow.qml" }
 local teleopView = QML { url = "./qml/TeleopWindow.qml" }
 
+-- ---- Language ----------------------------------------------------------------
+-- The window chrome switches inside QML, on the Tr singleton every window
+-- binds to; what the *models* carry — parameter names and units, nav status
+-- lines — is built here in the language mods/i18n.lua holds, so a tumbler throw
+-- tells this script which language that is.
+
+local tuner -- created below; the language switch reaches it through here
+
+-- Flatten the keyed config map into an array ordered by id (the Repeater needs
+-- a list) and hand it to the model. A saved "all" value replaces the default,
+-- so the form shows what the modules will actually be running after replay.
+local function config_params()
+    local params = {}
+    for key, c in pairs(config_defs) do
+        local all = saved["all:" .. c.id]
+        params[#params + 1] = {
+            key = key, id = c.id, label = i18n.label(c), unit = i18n.unit(c),
+            default = all and all.value or c.default,
+        }
+    end
+    table.sort(params, function(a, b) return a.id < b.id end)
+    return params
+end
+
+local function push_params()
+    cfgView { odo = { params = config_params() } }
+end
+
+---A language tumbler is a local choice: take it, keep it away from the cart.
+---@param msg table message from a view
+---@return boolean the message was a language switch
+local function take_lang(msg)
+    local lang = msg.odo and msg.odo.lang or msg.teleop and msg.teleop.lang
+        or msg.nav and msg.nav.lang
+    if lang == nil then return false end
+    if tuner then
+        -- the tuner re-labels its own rows and re-pushes ours through on_lang
+        tuner:set_lang(lang)
+    else
+        i18n.set(lang)
+        push_params()
+    end
+    log.info("gui: language {}", i18n.lang)
+    return true
+end
+
 -- QML "send" events -> websocket client -> main.lua server.
 -- Each view sends through child model branch() nodes, so every outgoing
 -- message is already wrapped as {odo = ...} or {nav = ...} or {teleop = ...}.
 -- Config sends are additionally remembered for replay / persistence.
 local function outgoing(msg)
+    if take_lang(msg) then return nil end
     log("From UI: {}", msg)
     if msg.odo and msg.odo.action == "config" then
         remember(msg.odo)
     end
     return msg
 end
+
+---The teleop view streams its twist at 20 Hz: forward it untouched, without
+---logging every message, but still catch a language switch.
+local function teleop_outgoing(msg)
+    if take_lang(msg) then return nil end
+    return msg
+end
+
 pipe(cfgView,    outgoing, client)
-pipe(teleopView, client)
+pipe(teleopView, teleop_outgoing, client)
 
 -- Map files live on the GUI machine, while mapping runs on the cart. Keep file
 -- I/O local and transfer the PNG payload as MsgPack binary over the websocket.
@@ -177,24 +233,25 @@ local function nav_status(text)
     navView { nav = { map_io_status = text } }
 end
 local function nav_outgoing(msg)
+    if take_lang(msg) then return nil end
     local nav = msg.nav
     if not nav then return msg end
     if nav.load_map_file then
         local path = local_file_path(nav.load_map_file)
         local file, err = io.open(path, "rb")
         if not file then
-            nav_status("Load failed: " .. tostring(err))
+            nav_status(i18n.fmt("map_load_failed", tostring(err)))
             return nil
         end
         local payload = bytes(file:read("a"))
         file:close()
-        nav_status("Uploading " .. path .. " …")
+        nav_status(i18n.fmt("map_uploading", path))
         client { nav = { load_map = payload } }
         return nil
     end
     if nav.dump_map_file then
         pending_map_dump = local_file_path(nav.dump_map_file)
-        nav_status("Requesting map …")
+        nav_status(i18n.text("map_requesting"))
         client { nav = { dump_map = true } }
         return nil
     end
@@ -202,19 +259,7 @@ local function nav_outgoing(msg)
 end
 pipe(navView, nav_outgoing, client)
 
--- Flatten the keyed config map into an array ordered by id (the Repeater needs
--- a list) and hand it to the model. A saved "all" value replaces the default,
--- so the form shows what the modules will actually be running after replay.
-local params = {}
-for key, c in pairs(config_defs) do
-    local all = saved["all:" .. c.id]
-    params[#params + 1] = {
-        key = key, id = c.id, label = c.label, unit = c.unit,
-        default = all and all.value or c.default,
-    }
-end
-table.sort(params, function(a, b) return a.id < b.id end)
-cfgView { odo = { params = params } }
+push_params()
 
 -- Route telemetry from the server into the model. Everything arrives already
 -- namespaced by node key ({odo = {chart, odom}}, {nav = {costmap, path, ...}});
@@ -232,9 +277,9 @@ pipe(client, function(msg)
             if file then
                 file:write(msg.nav.map_image:str())
                 file:close()
-                nav_status("Map saved to " .. pending_map_dump)
+                nav_status(i18n.fmt("map_saved", pending_map_dump))
             else
-                nav_status("Save failed: " .. tostring(err))
+                nav_status(i18n.fmt("map_save_failed", tostring(err)))
             end
             pending_map_dump = nil
         end
@@ -251,7 +296,6 @@ end)
 -- `serial=`. It is the same module and the same window debug/tune.lua opens.
 -- A config value it writes over CAN is remembered like any other, so a tuning
 -- survives the cart's restart through the replay above.
-local tuner
 if opts.tune then
     local common = {
         vmax = 10.0,
@@ -259,6 +303,9 @@ if opts.tune then
         on_config_sent = function(wheel, id, value)
             remember { wheel = wheel, id = id, value = value }
         end,
+        -- the language tumbler inside the tune window reaches the config form's
+        -- parameter names through here, so both windows never disagree
+        on_lang = function() push_params() end,
     }
     if opts.serial then
         common.transport = "serial"

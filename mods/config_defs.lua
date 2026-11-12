@@ -32,16 +32,39 @@
 -- =============================================================================
 
 return {
-    wheel_diameter = { id = 0, label = "Wheel diameter", unit = "m",            default = 0.32, min = 0.01, max = 1.0, step = 0.005 },
-    pid_kp         = { id = 1, label = "Velocity Kp",     unit = "A/(rad/s)",   default = 2.10, min = 0.0,  max = 50,  step = 0.01 },
-    pid_ki         = { id = 2, label = "Velocity Ki",     unit = "A/(rad/s·s)", default = 1.11, min = 0.0,  max = 50,  step = 0.01 },
-    pid_kd         = { id = 3, label = "Velocity Kd",     unit = "A·s/(rad/s)", default = 0.00, min = 0.0,  max = 50,  step = 0.01 },
+    -- `label`/`unit` are the English texts; `label_ru`/`unit_ru` are what the GUI
+    -- shows when its language tumbler is on Russian (the default). mods/i18n.lua
+    -- picks; tests/tuner_help.lua fails when a Russian text is missing.
+    wheel_diameter = {
+        id = 0, label = "Wheel diameter", label_ru = "Диаметр колеса",
+        unit = "m", unit_ru = "м",
+        default = 0.32, min = 0.01, max = 1.0, step = 0.005,
+    },
+    pid_kp         = {
+        id = 1, label = "Velocity Kp", label_ru = "Kp скорости",
+        unit = "A/(rad/s)", unit_ru = "А/(рад/с)",
+        default = 2.10, min = 0.0,  max = 50,  step = 0.01,
+    },
+    pid_ki         = {
+        id = 2, label = "Velocity Ki", label_ru = "Ki скорости",
+        unit = "A/(rad/s·s)", unit_ru = "А/(рад/с·с)",
+        default = 1.11, min = 0.0,  max = 50,  step = 0.01,
+    },
+    pid_kd         = {
+        id = 3, label = "Velocity Kd", label_ru = "Kd скорости",
+        unit = "A·s/(rad/s)", unit_ru = "А·с/(рад/с)",
+        default = 0.00, min = 0.0,  max = 50,  step = 0.01,
+    },
     -- The output-domain integral clamp: the firmware derives it as
     -- ki * integral_error_lim = 1.11 * 10.0, which is what a fresh module
     -- reports on G4. SimpleFOC's PID ignores it (it clamps the integral with
     -- the whole output), so on the default build it only has to stay in step
     -- with that derived value.
-    pid_i_limit    = { id = 4, label = "Integral limit",  unit = "A",           default = 11.1, min = 0.0,  max = 24,  step = 0.1  },
+    pid_i_limit    = {
+        id = 4, label = "Integral limit", label_ru = "Предел интеграла",
+        unit = "A", unit_ru = "А",
+        default = 11.1, min = 0.0,  max = 24,  step = 0.1,
+    },
 
     -- Current guard (overcurrent / stall protection). The overcurrent ids
     -- (5..8) apply to every backend that measures phase current (six-step and
@@ -50,13 +73,41 @@ return {
     -- hall-progress watchdog, which the guard's stall timer would pre-empt.
     -- A stall window of 0 disables the stall check. These values are persisted
     -- in the module EEPROM (config record version 5).
-    oc_peak_a      = { id = 5,  label = "OC peak level",    unit = "A",     default = 14,   min = 1,    max = 40,   step = 0.5 },
-    oc_peak_ms     = { id = 6,  label = "OC peak window",   unit = "ms",    default = 25,   min = 0,    max = 1000, step = 5    },
-    oc_sustain_a   = { id = 7,  label = "OC sustain level", unit = "A",     default = 10,   min = 1,    max = 40,   step = 0.5 },
-    oc_sustain_ms  = { id = 8,  label = "OC sustain window",unit = "ms",    default = 250,  min = 0,    max = 5000, step = 10   },
-    stall_current  = { id = 9,  label = "Stall current",    unit = "A",     default = 2,    min = 0.1,  max = 20,   step = 0.1  },
-    stall_speed    = { id = 10, label = "Stall speed",      unit = "rad/s", default = 0.11, min = 0.01, max = 5,    step = 0.01 },
-    stall_ms       = { id = 11, label = "Stall window",     unit = "ms",    default = 600,  min = 0,    max = 5000, step = 50   },
+    oc_peak_a      = {
+        id = 5, label = "OC peak level", label_ru = "Пиковый переток",
+        unit = "A", unit_ru = "А",
+        default = 14,   min = 1,    max = 40,   step = 0.5,
+    },
+    oc_peak_ms     = {
+        id = 6, label = "OC peak window", label_ru = "Окно пика",
+        unit = "ms", unit_ru = "мс",
+        default = 25,   min = 0,    max = 1000, step = 5,
+    },
+    oc_sustain_a   = {
+        id = 7, label = "OC sustain level", label_ru = "Длительный переток",
+        unit = "A", unit_ru = "А",
+        default = 10,   min = 1,    max = 40,   step = 0.5,
+    },
+    oc_sustain_ms  = {
+        id = 8, label = "OC sustain window", label_ru = "Окно длительного перетока",
+        unit = "ms", unit_ru = "мс",
+        default = 250,  min = 0,    max = 5000, step = 10,
+    },
+    stall_current  = {
+        id = 9, label = "Stall current", label_ru = "Ток застоя",
+        unit = "A", unit_ru = "А",
+        default = 2,    min = 0.1,  max = 20,   step = 0.1,
+    },
+    stall_speed    = {
+        id = 10, label = "Stall speed", label_ru = "Скорость застоя",
+        unit = "rad/s", unit_ru = "рад/с",
+        default = 0.11, min = 0.01, max = 5,    step = 0.01,
+    },
+    stall_ms       = {
+        id = 11, label = "Stall window", label_ru = "Окно застоя",
+        unit = "ms", unit_ru = "мс",
+        default = 600,  min = 0,    max = 5000, step = 50,
+    },
 
     -- Loop-shaping knobs of the SimpleFOC backend (ids 12..15; a backend
     -- without the knob rejects the write, so the six-step build ignores them).
@@ -67,10 +118,26 @@ return {
     -- rotation — the regen limit on a supply that cannot sink it, where 0
     -- leaves a moving wheel to coast. These are persisted in the module EEPROM
     -- (config record version 5) like the ids above.
-    vel_lpf        = { id = 12, label = "Velocity LPF",  unit = "s",    default = 0.05, min = 0.0,  max = 1,    step = 0.005 },
-    speed_ramp     = { id = 13, label = "Speed ramp",    unit = "m/s²", default = 0.75, min = 0.05, max = 100,  step = 0.05 },
-    torque_ramp    = { id = 14, label = "Torque ramp",   unit = "A/s",  default = 50,   min = 1,    max = 1000, step = 1    },
-    brake_current  = { id = 15, label = "Brake current", unit = "A",    default = 2.2,  min = 0,    max = 8,    step = 0.1  },
+    vel_lpf        = {
+        id = 12, label = "Velocity LPF", label_ru = "ФНЧ скорости",
+        unit = "s", unit_ru = "с",
+        default = 0.05, min = 0.0,  max = 1,    step = 0.005,
+    },
+    speed_ramp     = {
+        id = 13, label = "Speed ramp", label_ru = "Разгон скорости",
+        unit = "m/s²", unit_ru = "м/с²",
+        default = 0.75, min = 0.05, max = 100,  step = 0.05,
+    },
+    torque_ramp    = {
+        id = 14, label = "Torque ramp", label_ru = "Разгон момента",
+        unit = "A/s", unit_ru = "А/с",
+        default = 50,   min = 1,    max = 1000, step = 1,
+    },
+    brake_current  = {
+        id = 15, label = "Brake current", label_ru = "Ток торможения",
+        unit = "A", unit_ru = "А",
+        default = 2.2,  min = 0,    max = 8,    step = 0.1,
+    },
 
     -- Full-scale wheel speed (id 16): every speed command is normalized, -1..1,
     -- and the module scales it with this value. The unit is m/s at the wheel.
@@ -78,5 +145,9 @@ return {
     -- the live modulation ceiling, and clamps every command to that ceiling, so
     -- neither this table nor a stored EEPROM value can ask for a speed the
     -- drive has no voltage to regulate.
-    max_speed      = { id = 16, label = "Max wheel speed", unit = "m/s", default = 0.50, min = 0.01, max = 2.0, step = 0.005 },
+    max_speed      = {
+        id = 16, label = "Max wheel speed", label_ru = "Макс. скорость колеса",
+        unit = "m/s", unit_ru = "м/с",
+        default = 0.50, min = 0.01, max = 2.0, step = 0.005,
+    },
 }

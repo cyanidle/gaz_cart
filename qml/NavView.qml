@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
+import "Tr"
 
 // Costmap visualization + manual positioning + click-to-plan.
 // Reinterprets CostmapServer's raw buffer (GridHeader + cells, see
@@ -354,37 +355,40 @@ Item {
             anchors.bottom: parent.bottom
             spacing: 6
 
-            Label { text: "Costmap: " + root.gridW + "×" + root.gridH + " @ " +
-                          root.gridRes.toFixed(3) + " m"; color: "#333333" }
-            Label { text: "Origin: " + root.gridOriginX.toFixed(2) + ", " +
-                          root.gridOriginY.toFixed(2); color: "#333333" }
-            Label { text: "Robot: " + root.robot.x.toFixed(2) + ", " +
-                          root.robot.y.toFixed(2) + ", " +
-                          root.robot.theta.toFixed(2); color: "#333333" }
-            Label { text: "Path points: " + root.path.length; color: "#333333" }
-            Label { text: "Scan hits: " + root.scan.length; color: "#2b90d9" }
+            Label { text: Tr.tf("nav_costmap", [root.gridW, root.gridH,
+                                                root.gridRes.toFixed(3)]);
+                    color: "#333333" }
+            Label { text: Tr.tf("nav_origin", [root.gridOriginX.toFixed(2),
+                                               root.gridOriginY.toFixed(2)]);
+                    color: "#333333" }
+            Label { text: Tr.tf("nav_robot", [root.robot.x.toFixed(2),
+                                              root.robot.y.toFixed(2),
+                                              root.robot.theta.toFixed(2)]);
+                    color: "#333333" }
+            Label { text: Tr.tf("nav_path_points", root.path.length); color: "#333333" }
+            Label { text: Tr.tf("nav_scan_hits", root.scan.length); color: "#2b90d9" }
             Label {
                 objectName: "statusLabel"
                 color: "#333333"
                 text: {
                     var s = root.status
-                    if (s.reached === undefined) return "Status: —"
-                    if (s.reached && s.rotated) return "Status: done"
-                    if (s.reached) return "Status: rotating"
-                    if (s.is_stuck) return "Status: stuck"
-                    return "Status: driving"
+                    if (s.reached === undefined) return Tr.t("nav_status_none")
+                    if (s.reached && s.rotated) return Tr.t("nav_status_done")
+                    if (s.reached) return Tr.t("nav_status_rotating")
+                    if (s.is_stuck) return Tr.t("nav_status_stuck")
+                    return Tr.t("nav_status_driving")
                 }
             }
             Label {
                 objectName: "cmdVelLabel"
                 color: "#333333"
-                text: "cmd_vel  fwd:" + root.cmdVel.x.toFixed(2)
-                      + "  lat:" + root.cmdVel.y.toFixed(2)
-                      + "  rot:" + root.cmdVel.theta.toFixed(2)
+                text: Tr.tf("nav_cmd_vel", [root.cmdVel.x.toFixed(2),
+                                            root.cmdVel.y.toFixed(2),
+                                            root.cmdVel.theta.toFixed(2)])
             }
             Button {
                 objectName: "cancelBtn"
-                text: "Cancel target"
+                text: Tr.t("nav_cancel")
                 onClicked: {
                     root.target = null
                     model.send({ cancel: true })
@@ -393,7 +397,7 @@ Item {
             }
             CheckBox {
                 objectName: "discoveryCheck"
-                text: "Map discovery"
+                text: Tr.t("nav_discovery")
                 checked: root.discoveryEnabled
                 onClicked: model.send({ discovery_enabled: checked })
             }
@@ -401,23 +405,24 @@ Item {
                 Layout.fillWidth: true
                 Button {
                     objectName: "loadMapBtn"
-                    text: "Load map"
+                    text: Tr.t("nav_load_map")
                     Layout.fillWidth: true
                     onClicked: loadMapDialog.open()
                 }
                 Button {
                     objectName: "dumpMapBtn"
-                    text: "Dump map"
+                    text: Tr.t("nav_dump_map")
                     Layout.fillWidth: true
                     onClicked: dumpMapDialog.open()
                 }
             }
             Button {
                 objectName: "resetViewBtn"
-                text: "Reset view"
+                text: Tr.t("nav_reset_view")
                 Layout.fillWidth: true
                 onClicked: canvas.resetView()
             }
+            LangSwitch { model: root.model; Layout.topMargin: 4 }
             Label {
                 visible: root.mapIoStatus.length > 0
                 Layout.fillWidth: true
@@ -429,11 +434,7 @@ Item {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: "#555555"
-                text: "LMB click — set target\nLMB drag — set target + heading\n" +
-                      "Shift+LMB — reposition robot\n" +
-                      "Wheel — zoom\nMMB drag — pan\n" +
-                      "RMB — drop an obstacle\n(sim: lidar discovers it; else a\ntemporary costmap point)\n\n" +
-                      "Blue dots: lidar scan hits\nTicks: path point theta\nOrange arrow: local planner's pick"
+                text: Tr.t("nav_help")
             }
             Item { Layout.fillHeight: true }
         }
@@ -441,18 +442,18 @@ Item {
 
     FileDialog {
         id: loadMapDialog
-        title: "Load occupancy map"
+        title: Tr.t("nav_load_title")
         fileMode: FileDialog.OpenFile
-        nameFilters: ["PNG map images (*.png)", "Images (*.png *.jpg *.jpeg *.bmp)"]
+        nameFilters: [Tr.t("nav_filter_png"), Tr.t("nav_filter_images")]
         onAccepted: model.send({ load_map_file: selectedFile.toString() })
     }
 
     FileDialog {
         id: dumpMapDialog
-        title: "Dump occupancy map"
+        title: Tr.t("nav_dump_title")
         fileMode: FileDialog.SaveFile
         defaultSuffix: "png"
-        nameFilters: ["PNG map images (*.png)"]
+        nameFilters: [Tr.t("nav_filter_png")]
         onAccepted: model.send({ dump_map_file: selectedFile.toString() })
     }
 }

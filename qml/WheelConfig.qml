@@ -2,6 +2,7 @@ import QtQuick 2.3
 import QtQuick.Controls 2.3
 import QtQuick.Layouts 1.3
 import QtCharts 2.3
+import "Tr"
 
 Item {
     id: root
@@ -65,7 +66,7 @@ Item {
 
         // ---- Speed tuning chart -------------------------------------------
         GroupBox {
-            title: "Speed — target vs actual"
+            title: Tr.t("chart_speed")
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.minimumHeight: 220
@@ -77,7 +78,7 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 8
-                    Label { text: "Wheel" }
+                    Label { text: Tr.t("wheel") }
                     ComboBox {
                         id: chartWheelBox
                         objectName: "chartWheelBox"
@@ -90,6 +91,8 @@ Item {
                             actSeries.clear()
                         }
                     }
+                    LangSwitch { model: root.model; Layout.leftMargin: 8 }
+                    Item { Layout.fillWidth: true }
                 }
 
                 ChartView {
@@ -108,19 +111,19 @@ Item {
                     ValueAxis {
                         id: xAxis
                         min: 0; max: 10
-                        titleText: "time (s)"
+                        titleText: Tr.t("axis_time")
                         labelFormat: "%.0f"
                     }
                     ValueAxis {
                         id: yAxis
                         min: -0.2; max: 0.8
-                        titleText: "speed (m/s)"
+                        titleText: Tr.t("cfg_axis_speed")
                         labelFormat: "%.2f"
                     }
 
                     LineSeries {
                         id: actSeries
-                        name: "actual"
+                        name: Tr.t("series_actual")
                         color: "#27ae60"
                         width: 2
                         axisX: xAxis
@@ -128,7 +131,7 @@ Item {
                     }
                     LineSeries {
                         id: tgtSeries
-                        name: "target"
+                        name: Tr.t("series_target")
                         color: "#e74c3c"
                         width: 2
                         style: Qt.DashLine
@@ -143,11 +146,11 @@ Item {
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
-            Label { text: "Target speed" }
+            Label { text: Tr.t("tune_target_speed") }
             ComboBox {
                 id: tgtWheelBox
                 objectName: "tgtWheelBox"
-                model: ["all", "fl", "fr", "rl", "rr"]
+                model: [Tr.t("wheel_all"), "fl", "fr", "rl", "rr"]
                 Layout.preferredWidth: 60
             }
             TextField {
@@ -160,10 +163,11 @@ Item {
                     var v = parseFloat(text)
                     if (isNaN(v)) return
                     model.send({ action: "set_speed", wheel: tgtWheelBox.currentText, value: v })
-                    statusLabel.text = "Target " + tgtWheelBox.currentText + " = " + v + " m/s"
+                    statusLabel.text = Tr.tf("cfg_target_status",
+                        [tgtWheelBox.currentText, v])
                 }
             }
-            Label { text: "m/s"; color: "#888" }
+            Label { text: Tr.t("unit_m_s"); color: "#888" }
             Item { Layout.fillWidth: true }
         }
 
@@ -171,11 +175,11 @@ Item {
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
-            Label { text: "Direct voltage" }
+            Label { text: Tr.t("tune_direct_voltage") }
             ComboBox {
                 id: dirWheelBox
                 objectName: "dirWheelBox"
-                model: ["all", "fl", "fr", "rl", "rr"]
+                model: [Tr.t("wheel_all"), "fl", "fr", "rl", "rr"]
                 Layout.preferredWidth: 60
             }
             TextField {
@@ -188,16 +192,17 @@ Item {
                     var v = parseFloat(text)
                     if (isNaN(v)) return
                     model.send({ action: "direct", wheel: dirWheelBox.currentText, value: v })
-                    statusLabel.text = "Direct " + dirWheelBox.currentText + " = " + v + " V (open loop)"
+                    statusLabel.text = Tr.tf("cfg_direct_status",
+                        [dirWheelBox.currentText, v])
                 }
             }
-            Label { text: "V"; color: "#888" }
+            Label { text: Tr.t("unit_v"); color: "#888" }
             Item { Layout.fillWidth: true }
         }
 
         // ---- Config form (data-driven Repeater) ---------------------------
         GroupBox {
-            title: "PID & geometry config"
+            title: Tr.t("cfg_group_title")
             Layout.fillWidth: true
 
             ColumnLayout {
@@ -206,11 +211,11 @@ Item {
 
                 RowLayout {
                     Layout.fillWidth: true
-                    Label { text: "Target wheel" }
+                    Label { text: Tr.t("cfg_target_wheel") }
                     ComboBox {
                         id: wheelBox
                         objectName: "wheelBox"
-                        model: ["all", "fl", "fr", "rl", "rr"]
+                        model: [Tr.t("wheel_all"), "fl", "fr", "rl", "rr"]
                         Layout.fillWidth: true
                     }
                 }
@@ -223,8 +228,12 @@ Item {
                         Layout.fillWidth: true
                         spacing: 8
                         Label {
+                            objectName: "cfgparam_" + modelData.key
                             text: modelData.label
-                            Layout.preferredWidth: 150
+                            // Russian names run longer than the English ones;
+                            // the elide is only a safety net for a future string
+                            Layout.preferredWidth: 200
+                            elide: Text.ElideRight
                             color: "#333"
                         }
                         // Value + unit as one visual group: a thin bordered
@@ -249,10 +258,13 @@ Item {
                                     background: Rectangle { color: "transparent" }
                                     onAccepted: {
                                         var v = parseFloat(text)
-                                        if (isNaN(v)) { statusLabel.text = "Not a number: " + text; return }
+                                        if (isNaN(v)) {
+                                            statusLabel.text = Tr.tf("cfg_not_a_number", text)
+                                            return
+                                        }
                                         root.model.send({ action: "config", wheel: wheelBox.currentText, id: modelData.id, value: v })
-                                        statusLabel.text = "Sent " + modelData.label + " = " + v
-                                            + " to " + wheelBox.currentText
+                                        statusLabel.text = Tr.tf("cfg_sent",
+                                            [modelData.label, v, wheelBox.currentText])
                                     }
                                 }
                                 Label {
@@ -271,7 +283,7 @@ Item {
 
         // ---- Status bar ---------------------------------------------------
         Label {
-            text: model.odomText ? model.odomText : "(no telemetry yet)"
+            text: model.odomText ? model.odomText : Tr.t("no_telemetry")
             color: "#555"
             Layout.fillWidth: true
         }
@@ -281,7 +293,7 @@ Item {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: "#444"
-            text: "Edit a field and press Enter to apply."
+            text: Tr.t("cfg_hint")
         }
     }
 }

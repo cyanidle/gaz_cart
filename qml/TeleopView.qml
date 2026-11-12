@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "Tr"
 
 // Keyboard teleoperation: arrow keys or WASD drive the robot, Space stops.
 // While keys are held, twist commands stream to the Lua teleop node at ~20 Hz.
@@ -112,16 +113,19 @@ Item {
         spacing: 12
 
         // ── Header ────────────────────────────────────────────────────
-        Label {
-            text: "Keyboard Teleop"
-            font.pixelSize: 18
-            font.bold: true
-            color: "#333"
+        RowLayout {
+            Layout.fillWidth: true
+            Label {
+                text: Tr.t("tele_title")
+                font.pixelSize: 18
+                font.bold: true
+                color: "#333"
+            }
+            Item { Layout.fillWidth: true }
+            LangSwitch { model: root.model }
         }
         Label {
-            text: "Click here to grab focus, then use arrow keys or WASD to drive. " +
-                  "Space stops this window's command; the joystick's stop organ stops " +
-                  "the cart for every source."
+            text: Tr.t("tele_hint")
             color: "#666"
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
@@ -129,14 +133,14 @@ Item {
 
         // ── Speed controls ────────────────────────────────────────────
         GroupBox {
-            title: "Speed fraction"
+            title: Tr.t("tele_speed_fraction")
             Layout.fillWidth: true
             ColumnLayout {
                 anchors.fill: parent
                 spacing: 8
                 RowLayout {
                     Layout.fillWidth: true
-                    Label { text: "Linear"; Layout.preferredWidth: 120 }
+                    Label { text: Tr.t("tele_linear"); Layout.preferredWidth: 120 }
                     Slider {
                         id: linSlider
                         objectName: "linSpdSlider"
@@ -152,7 +156,7 @@ Item {
                 }
                 RowLayout {
                     Layout.fillWidth: true
-                    Label { text: "Angular"; Layout.preferredWidth: 120 }
+                    Label { text: Tr.t("tele_angular"); Layout.preferredWidth: 120 }
                     Slider {
                         id: rotSlider
                         objectName: "rotSpdSlider"
@@ -171,7 +175,7 @@ Item {
 
         // ── Cart command (what the wheels are actually doing) ─────────
         GroupBox {
-            title: "Cart command (normalised -1..1)"
+            title: Tr.t("tele_cart_group")
             Layout.fillWidth: true
             ColumnLayout {
                 anchors.fill: parent
@@ -187,7 +191,7 @@ Item {
                     border { color: "#c62828"; width: 1 }
                     Label {
                         anchors.centerIn: parent
-                        text: "STOP — joystick stop organ engaged"
+                        text: Tr.t("tele_stop_banner")
                         color: "#c62828"
                         font.bold: true
                     }
@@ -197,23 +201,23 @@ Item {
                     columns: 2
                     rowSpacing: 6; columnSpacing: 16
 
-                    Label { text: "Operator input:"; color: "#333" }
+                    Label { text: Tr.t("tele_operator"); color: "#333" }
                     Label {
                         objectName: "operatorLabel"
-                        text: root.operatorInput
+                        text: Tr.sourceName(root.operatorInput)
                         font.bold: true
                         color: root.operatorInput === "keyboard" ? "#1565c0" : "#6a1b9a"
                     }
 
-                    Label { text: "Issued by:"; color: "#333" }
+                    Label { text: Tr.t("tele_issued_by"); color: "#333" }
                     Label {
                         objectName: "cartSourceLabel"
-                        text: root.cartSource
+                        text: Tr.sourceName(root.cartSource)
                         font.bold: true
                         color: "#1565c0"
                     }
 
-                    Label { text: "Linear v:"; color: "#333" }
+                    Label { text: Tr.t("tele_linear_v"); color: "#333" }
                     Label {
                         objectName: "cartVLabel"
                         text: root.cartV.toFixed(3)
@@ -221,7 +225,7 @@ Item {
                         color: "#1565c0"
                     }
 
-                    Label { text: "Angular ω:"; color: "#333" }
+                    Label { text: Tr.t("tele_angular_w"); color: "#333" }
                     Label {
                         objectName: "cartOmegaLabel"
                         text: root.cartOmega.toFixed(3)
@@ -234,32 +238,31 @@ Item {
 
         // ── Twist this window asks for ────────────────────────────────
         GroupBox {
-            title: "This window (normalised -1..1)"
+            title: Tr.t("tele_window_group")
             Layout.fillWidth: true
             GridLayout {
                 anchors.fill: parent
                 columns: 2
                 rowSpacing: 6; columnSpacing: 16
 
-                Label { text: "Linear v:"; color: "#333" }
+                Label { text: Tr.t("tele_linear_v"); color: "#333" }
                 Label { text: root.cmdV.toFixed(3); font.bold: true; color: "#777" }
 
-                Label { text: "Angular ω:"; color: "#333" }
+                Label { text: Tr.t("tele_angular_w"); color: "#333" }
                 Label { text: root.cmdOmega.toFixed(3); font.bold: true; color: "#777" }
             }
         }
 
         // ── Bench: one wheel on its own ───────────────────────────────
         GroupBox {
-            title: "Bench — single wheel"
+            title: Tr.t("tele_bench_group")
             Layout.fillWidth: true
             ColumnLayout {
                 anchors.fill: parent
                 spacing: 8
 
                 Label {
-                    text: "Drive one wheel with W/S (or ▲/▼); the other three stay parked. " +
-                          "Use it to bring up a module without driving the cart."
+                    text: Tr.t("tele_bench_hint")
                     color: "#666"
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
@@ -271,7 +274,7 @@ Item {
                     CheckBox {
                         id: singleWheelCheck
                         objectName: "singleWheelCheck"
-                        text: "single wheel"
+                        text: Tr.t("tele_single_wheel")
                         checked: false
                         onCheckedChanged: {
                             root.singleWheel = checked
@@ -296,7 +299,7 @@ Item {
 
         // ── Visual key indicators ─────────────────────────────────────
         GroupBox {
-            title: "Controls"
+            title: Tr.t("tele_controls")
             Layout.fillWidth: true
             GridLayout {
                 anchors.fill: parent

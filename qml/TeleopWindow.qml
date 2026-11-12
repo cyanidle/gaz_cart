@@ -1,12 +1,13 @@
 import QtQuick
 import QtQuick.Controls
+import "Tr"
 
 // Standalone teleop window — keyboard-driven robot control.
 ApplicationWindow {
     id: root
     visible: true
     width: 400; height: 780
-    title: "gaz_cart — Teleop"
+    title: Tr.t("window_teleop")
     color: "#f0f0f0"
 
     TeleopView {

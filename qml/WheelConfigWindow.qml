@@ -1,12 +1,13 @@
 import QtQuick
 import QtQuick.Controls
+import "Tr"
 
 // Standalone config/tuning window — PID chart, speed controls, config form.
 ApplicationWindow {
     id: root
     visible: true
     width: 700; height: 800
-    title: "gaz_cart — Config"
+    title: Tr.t("window_config")
     color: "#f0f0f0"
 
     WheelConfig {

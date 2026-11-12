@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtCharts 2.3
+import "Tr"
 
 // One bench tuner view for both transports (mods/tuner.lua decides which):
 //   serial  a module over USART2 — per-phase diagnostics, read-back, enable
@@ -27,8 +28,9 @@ Item {
     property double chartTime: 0
     property double lastSample: 0
 
-    // Shared row metric: label | slider | value field | unit.
-    property int rowLabelWidth: 170
+    // Shared row metric: label | slider | value field | unit. Wide enough for the
+    // Russian names, which run longer than the English ones.
+    property int rowLabelWidth: 200
     property int rowFieldWidth: 90
     property int rowUnitWidth: 80
 
@@ -135,7 +137,7 @@ Item {
             Layout.fillWidth: true
             spacing: 8
             Label {
-                text: "Wheel"
+                text: Tr.t("wheel")
                 visible: wheelBox.visible
             }
             ComboBox {
@@ -150,9 +152,8 @@ Item {
             Label {
                 objectName: "sourceLabel"
                 text: root.transport === "serial"
-                    ? "Module over serial — values read from the module"
-                    : "Cart over CAN (service channel) — wheel " + root.wheel
-                        + ", values are what was sent"
+                    ? Tr.t("tune_source_serial")
+                    : Tr.tf("tune_source_can", root.wheel)
                 font.bold: true
                 color: "#333"
             }
@@ -163,11 +164,13 @@ Item {
                 // so writing that id keeps the hint honest. Over CAN the cart
                 // maps a normalized wheel command with its own constant and
                 // nothing is read back, so the hint names the cart scale.
-                text: root.maxSpeedMps.toFixed(3) + " m/s at 1.0 "
-                    + (root.transport === "serial" ? "(config id 16)" : "(cart full scale)")
+                text: Tr.tf(root.transport === "serial" ? "tune_fullscale_serial"
+                                                        : "tune_fullscale_can",
+                            root.maxSpeedMps.toFixed(3))
                 color: "#888"
                 font.pixelSize: 11
             }
+            LangSwitch { model: root.model; Layout.leftMargin: 12 }
         }
 
         // ---- Charts --------------------------------------------------------
@@ -186,24 +189,24 @@ Item {
                 antialiasing: true
                 theme: ChartView.ChartThemeLight
                 legend.alignment: Qt.AlignTop
-                title: "Speed — target vs actual"
+                title: Tr.t("chart_speed")
 
                 ValueAxis {
                     id: speedX
                     min: 0; max: 20
-                    titleText: "time (s)"
+                    titleText: Tr.t("axis_time")
                     labelFormat: "%.0f"
                 }
                 ValueAxis {
                     id: speedY
                     min: -0.2; max: 0.8
-                    titleText: "wheel speed (m/s)"
+                    titleText: Tr.t("tune_axis_speed")
                     labelFormat: "%.2f"
                 }
                 LineSeries {
                     id: actSeries
                     objectName: "actSeries"
-                    name: "actual"
+                    name: Tr.t("series_actual")
                     color: "#27ae60"
                     width: 2
                     axisX: speedX; axisY: speedY
@@ -211,7 +214,7 @@ Item {
                 LineSeries {
                     id: tgtSeries
                     objectName: "tgtSeries"
-                    name: "target"
+                    name: Tr.t("series_target")
                     color: "#e74c3c"
                     width: 2
                     style: Qt.DashLine
@@ -228,12 +231,12 @@ Item {
                 antialiasing: true
                 theme: ChartView.ChartThemeLight
                 legend.alignment: Qt.AlignTop
-                title: "currents (A) and d/q voltages (V)"
+                title: Tr.t("tune_chart_aux")
 
                 ValueAxis {
                     id: auxX
                     min: 0; max: 20
-                    titleText: "time (s)"
+                    titleText: Tr.t("axis_time")
                     labelFormat: "%.0f"
                 }
                 ValueAxis {
@@ -244,7 +247,7 @@ Item {
                 LineSeries {
                     id: iqSeries
                     objectName: "iqSeries"
-                    name: "iq (A)"
+                    name: Tr.t("tune_series_iq")
                     color: "#2980b9"
                     width: 2
                     axisX: auxX; axisY: auxY
@@ -252,7 +255,7 @@ Item {
                 LineSeries {
                     id: uqSeries
                     objectName: "uqSeries"
-                    name: "uq (V)"
+                    name: Tr.t("tune_series_uq")
                     color: "#8e44ad"
                     width: 1
                     axisX: auxX; axisY: auxY
@@ -260,7 +263,7 @@ Item {
                 LineSeries {
                     id: udSeries
                     objectName: "udSeries"
-                    name: "ud (V)"
+                    name: Tr.t("tune_series_ud")
                     color: "#d35400"
                     width: 1
                     axisX: auxX; axisY: auxY
@@ -268,7 +271,7 @@ Item {
                 LineSeries {
                     id: imSeries
                     objectName: "imSeries"
-                    name: "|i| phase (A)"
+                    name: Tr.t("tune_series_im")
                     color: "#16a085"
                     width: 1
                     axisX: auxX; axisY: auxY
@@ -276,7 +279,7 @@ Item {
                 LineSeries {
                     id: busSeries
                     objectName: "busSeries"
-                    name: "bus (V)"
+                    name: Tr.t("tune_series_bus")
                     color: "#2c3e50"
                     width: 1
                     axisX: auxX; axisY: auxY
@@ -289,7 +292,7 @@ Item {
             Layout.fillWidth: true
             spacing: 8
 
-            Label { text: "Target speed"; Layout.preferredWidth: root.rowLabelWidth }
+            Label { text: Tr.t("tune_target_speed"); Layout.preferredWidth: root.rowLabelWidth }
             Slider {
                 id: tgtSlider
                 objectName: "tgtSlider"
@@ -302,8 +305,8 @@ Item {
                 property double lastSend: 0
                 function send() {
                     root.model.send({ target: value })
-                    statusLabel.text = "Target " + value.toFixed(3) + " x full scale = "
-                        + (value * root.maxSpeedMps).toFixed(3) + " m/s"
+                    statusLabel.text = Tr.tf("tune_target_status",
+                        [value.toFixed(3), (value * root.maxSpeedMps).toFixed(3)])
                 }
                 onMoved: {
                     var now = Date.now()
@@ -328,7 +331,7 @@ Item {
             Label {
                 objectName: "tgtMpsLabel"
                 Layout.preferredWidth: root.rowUnitWidth
-                text: (tgtSlider.value * root.maxSpeedMps).toFixed(3) + " m/s"
+                text: (tgtSlider.value * root.maxSpeedMps).toFixed(3) + " " + Tr.t("unit_m_s")
                 elide: Text.ElideRight
                 color: "#888"
             }
@@ -338,7 +341,7 @@ Item {
             Layout.fillWidth: true
             spacing: 8
 
-            Label { text: "Direct voltage"; Layout.preferredWidth: root.rowLabelWidth }
+            Label { text: Tr.t("tune_direct_voltage"); Layout.preferredWidth: root.rowLabelWidth }
             Slider {
                 id: voltSlider
                 objectName: "voltSlider"
@@ -350,7 +353,7 @@ Item {
                 property double lastSend: 0
                 function send() {
                     root.model.send({ voltage: value })
-                    statusLabel.text = "Direct voltage " + value.toFixed(3) + " V (open loop)"
+                    statusLabel.text = Tr.tf("tune_direct_status", value.toFixed(3))
                 }
                 onMoved: {
                     var now = Date.now()
@@ -373,7 +376,7 @@ Item {
                 }
             }
             Label {
-                text: "V"
+                text: Tr.t("unit_v")
                 Layout.preferredWidth: root.rowUnitWidth
                 color: "#888"
             }
@@ -386,7 +389,7 @@ Item {
             spacing: 8
 
             Label {
-                text: "Voltage range"
+                text: Tr.t("tune_voltage_range")
                 Layout.preferredWidth: root.rowLabelWidth
                 color: "#555"
             }
@@ -432,57 +435,57 @@ Item {
             Button {
                 objectName: "enableBtn"
                 visible: root.canEnable
-                text: "Enable"
+                text: Tr.t("tune_enable")
                 onClicked: root.model.send({ enable: true })
             }
             Button {
                 objectName: "disableBtn"
                 visible: root.canEnable
-                text: "Disable"
+                text: Tr.t("tune_disable")
                 onClicked: root.model.send({ enable: false })
             }
             Button {
                 objectName: "resetBtn"
-                text: "Reset"
+                text: Tr.t("tune_reset")
                 // Zeroes the drive sliders and both set-points; parameters stay.
                 onClicked: {
                     tgtSlider.value = 0
                     voltSlider.value = 0
                     root.model.send({ zero: true })
-                    statusLabel.text = "Set-points zeroed (parameters kept)"
+                    statusLabel.text = Tr.t("tune_reset_status")
                 }
             }
             Button {
                 objectName: "calibrateBtn"
                 visible: root.diagnostics
-                text: "Calibrate R/L"
+                text: Tr.t("tune_calibrate")
                 onClicked: root.model.send({ line: "A" })
             }
             Button {
                 objectName: "readbackBtn"
                 visible: root.canReadBack
-                text: "Read from module"
+                text: Tr.t("tune_readback")
                 onClicked: root.model.send({ readback: true })
             }
             Button {
                 objectName: "traceArmBtn"
                 visible: root.diagnostics
-                text: "Trace arm"
+                text: Tr.t("tune_trace_arm")
                 onClicked: {
                     root.model.send({ line: "W1" })
-                    statusLabel.text = "Trace armed: the next anomaly dumps ~51 ms of loop history"
+                    statusLabel.text = Tr.t("tune_trace_armed")
                 }
             }
             Button {
                 objectName: "traceDumpBtn"
                 visible: root.diagnostics
-                text: "Trace dump"
+                text: Tr.t("tune_trace_dump")
                 onClicked: root.model.send({ line: "W" })
             }
             Button {
                 objectName: "countersBtn"
                 visible: root.diagnostics
-                text: "Counters"
+                text: Tr.t("tune_counters")
                 onClicked: root.model.send({ line: "K" })
             }
             Item { Layout.fillWidth: true }
@@ -510,6 +513,7 @@ Item {
                             objectName: "paramlabel_" + modelData.key
                             text: modelData.label
                             Layout.preferredWidth: root.rowLabelWidth
+                            elide: Text.ElideRight
                             color: paramHover.hovered ? "#2c7fb8" : "#333"
                             font.underline: paramHover.hovered
 
@@ -537,15 +541,22 @@ Item {
                             stepSize: modelData.step
                             value: modelData.value
                             snapMode: Slider.SnapAlways
-                            property double sentValue: modelData.value
+                            // Snapshot of the value the module has (or was sent),
+                            // taken once the slider exists so a press that does not
+                            // move the knob never turns into a config write. It
+                            // must be a snapshot, not a binding: a live one would
+                            // follow every change and suppress the real sends.
+                            property double sentValue: 0
+                            Component.onCompleted: sentValue = value
                             property double lastSend: 0
                             function send() {
                                 if (Math.abs(value - sentValue) < 1e-9) return
                                 sentValue = value
                                 root.model.send({ set: { id: modelData.id, value: value } })
-                                statusLabel.text = "Sent " + modelData.label + " = "
-                                    + value.toFixed(root.decimalsOf(modelData.step))
-                                    + " " + modelData.unit
+                                statusLabel.text = Tr.tf("tune_sent", [
+                                    modelData.label,
+                                    value.toFixed(root.decimalsOf(modelData.step)),
+                                    modelData.unit])
                             }
                             onMoved: {
                                 var now = Date.now()
@@ -597,7 +608,7 @@ Item {
         Label {
             id: telemetryLabel
             objectName: "telemetryLabel"
-            text: model.status ? model.status : "(no telemetry yet)"
+            text: model.status ? model.status : Tr.t("tune_no_telemetry")
             color: "#555"
             Layout.fillWidth: true
         }
@@ -607,7 +618,7 @@ Item {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: "#444"
-            text: "Drag a slider (or type a value and press Enter) to apply. Hover a parameter to see what it does."
+            text: Tr.t("tune_hint")
         }
     }
 }
