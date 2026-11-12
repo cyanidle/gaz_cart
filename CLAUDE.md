@@ -271,6 +271,13 @@ and feeds the deltas to `mods/odometry.lua`. It is a running total from module
 boot (not a wrapped count), so a module restart resets it to zero and the node
 discards the resulting step.
 
+`debug/cyphal_vcan.lua` proves the whole path without hardware or root: four
+simulated modules (node ids 1..4) publish travel and linear speed on Qt's
+`virtualcan` bus, the cart's own port map and `nodes/odo.lua` consume them, the
+speed/direct/config commands travel back, GetInfo answers in both directions,
+and a raw CAN worker checks what is really on the wire — every Cyphal frame must
+carry the FD flag and BRS, and multi-frame transfers must happen.
+
 ## Serial bench channel (USART2)
 
 `App/serial_line.cpp` runs a SimpleFOC-style text line protocol on USART2
