@@ -39,6 +39,16 @@ Item {
         return d
     }
 
+    // Narrowing the voltage range must not leave a voltage applied that the
+    // slider can no longer show: re-send the clamped value.
+    function clampVoltage() {
+        var clamped = Math.max(minVoltage, Math.min(maxVoltage, voltSlider.value))
+        if (Math.abs(clamped - voltSlider.value) > 1e-9) {
+            voltSlider.value = clamped
+            voltSlider.send()
+        }
+    }
+
     // Feed the latest diagnostics sample into the chart series at ~25 Hz.
     // Maintain a 20 s rolling window: append, drop points older than the
     // window, scroll X on every chart, rescale Y to the points still visible.
@@ -350,8 +360,8 @@ Item {
         // The module's open-loop channel takes any voltage; what it can apply is
         // bounded by the modulation ceiling (half the bus times the bootstrap
         // headroom), so the useful range moves with the rail. Editable here
-        // instead of only on the command line (`vmax=`), and remembered in the
-        // sent-config state like the rest of the tuning.
+        // instead of only on the command line (`vmax=`); the range is session
+        // state — `tune.lua` seeds it and keeps no copy.
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
@@ -361,19 +371,24 @@ Item {
                 Layout.preferredWidth: root.rowLabelWidth
                 color: "#555"
             }
+            // Keeps the two fields and the range label in the same columns as
+            // every other row (label | slider | field | unit): without a filler
+            // here they pack left against the label and break the alignment.
+            Item { Layout.fillWidth: true }
             TextField {
                 id: voltMinField
                 objectName: "voltMinField"
                 Layout.preferredWidth: root.rowFieldWidth
-                text: (-root.maxVoltage).toFixed(1)
+                text: root.minVoltage.toFixed(1)
                 selectByMouse: true
                 horizontalAlignment: TextInput.AlignHCenter
                 validator: DoubleValidator { bottom: -40.0; top: 0.0 }
                 onEditingFinished: {
                     var v = parseFloat(text)
-                    if (isNaN(v)) { text = (-root.maxVoltage).toFixed(1); return }
+                    if (isNaN(v)) { text = root.minVoltage.toFixed(1); return }
                     root.minVoltage = Math.min(0, Math.max(-40, v))
                     text = root.minVoltage.toFixed(1)
+                    root.clampVoltage()
                 }
             }
             TextField {
@@ -389,13 +404,8 @@ Item {
                     if (isNaN(v)) { text = root.maxVoltage.toFixed(1); return }
                     root.maxVoltage = Math.max(0, Math.min(40, v))
                     text = root.maxVoltage.toFixed(1)
+                    root.clampVoltage()
                 }
-            }
-            Label {
-                Layout.preferredWidth: root.rowUnitWidth
-                text: root.minVoltage.toFixed(1) + ".." + root.maxVoltage.toFixed(1) + " V"
-                elide: Text.ElideRight
-                color: "#888"
             }
         }
 

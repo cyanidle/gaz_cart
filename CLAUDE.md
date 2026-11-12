@@ -314,16 +314,17 @@ Cyphal remains the cart's control path; commands received here drive the same
 - Bench scripts live in `debug/`: `bench.py` is the line client
   (`python3 debug/bench.py script debug/bench_speed_sweep.txt`, port from
   `$BENCH_PORT`), `bench_speed_sweep.txt` holds steady speeds to fit the EMF
-  constant against the applied q-voltage, and `bench_maxspeed_hold.txt` holds
-  full scale both directions with the trace armed. Both park the drive at the
-  end.
+  constant against the applied q-voltage, `bench_maxspeed_hold.txt` holds full
+  scale both directions with the trace armed, and `bench_voltage_hold.txt` does
+  the same in open loop (`Q`). All three park the drive at the end.
 - `K` answers one counter per mechanism that can stop the drive or take
   authority from a regulator (`K1` hall: illegal transitions, counted edges,
   angle calls, implausible rates, sector pulls, 0/2pi wraps; `K2` stop: guard
   overcurrent/stall, derate rail-high/rail-low, driver faults, coasts; `K3`
   limit: target clamps, current-limit and voltage-limit episodes, brake clamp,
-  regulator resets; `K4` loop: periods over budget, the worst one, and
-  free-store allocations made while the loop ran). Read it before and after an
+  regulator resets; `K4` loop: periods over budget, the worst one, rate
+  timeouts and free-store allocations made while the loop ran; `K5` phase: the
+  worst duration of each phase of the app loop). Read it before and after an
   event and the counter that moved names the mechanism. Sector pulls track the
   edge count (~1 per edge) by construction; 0/2pi wraps run at one per rotor
   revolution. The loop makes no heap allocations — `heap=` reports the count
