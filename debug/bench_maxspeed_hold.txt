@@ -1,0 +1,52 @@
+# Full-scale hold, both directions — the stutter hunt.
+#
+# Holds the drive at its commanded maximum (normalized 1.0 = the module's full
+# scale, `G16`) in each direction with the loop trace armed, and reports the
+# counters before and after each hold. The stutter is more reliable the faster
+# the wheel turns, so this is the run to graph:
+#
+#   python3 debug/bench.py script debug/bench_maxspeed_hold.txt
+#
+# Then read `K`: one counter per mechanism that can stop the drive or take
+# authority from a regulator. The counter that moved between two `K` dumps names
+# the mechanism, and an armed trace (`W1`) dumps the ~50 ms of loop history that
+# led into the next snap / supply derate / stall / driver fault on its own.
+#
+# Wheel must be free. Never against a powered cart.
+
+? 2
+> M20
+> V1
+> W1
+@ 0.3
+> K
+@ 0.5
+> E1
+@ 1.0
+
+> T1.0
+? 10.0
+> K
+@ 0.5
+
+> T-1.0
+? 10.0
+> K
+@ 0.5
+
+> T1.0
+? 8.0
+> K
+@ 0.5
+
+> T0
+@ 2.0
+> K
+@ 0.5
+> M0
+> V0
+@ 0.5
+> E0
+@ 0.3
+> S
+@ 0.4

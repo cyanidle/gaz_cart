@@ -1,0 +1,55 @@
+# Speed sweep: steady-state q-voltage against shaft rate, both directions.
+#
+# What it measures: at a steady set-point with little torque the q-voltage is
+# the back-EMF plus the phase IR drop, so `uq / (v * 64)` is the machine's EMF
+# constant in V per rotor rad/s (v is the wheel rate, the halls count the
+# rotor). Every voltage and speed budget in the firmware derives from that
+# number (App/motor_limits.h), so it is worth measuring rather than trusting a
+# nameplate.
+#
+# Read it as: for each hold, take the steady part of the `D` lines, and fit
+# |u| against |v|.
+#
+#   python3 debug/bench.py script debug/bench_speed_sweep.txt
+#
+# Wheel must be free (this spins it). V1 telemetry, then the holds; counters and
+# a trace dump at the end, then park.
+
+? 2
+> M20
+> V1
+@ 0.3
+> K
+@ 0.5
+> E1
+@ 1.0
+
+> T0.4
+? 4.0
+> T0.6
+? 4.0
+> T0.8
+? 4.0
+> T1.0
+? 5.0
+
+> T-0.4
+? 4.0
+> T-0.6
+? 4.0
+> T-0.8
+? 4.0
+> T-1.0
+? 5.0
+
+> T0
+@ 2.0
+> K
+@ 0.5
+> M0
+> V0
+@ 0.5
+> E0
+@ 0.3
+> S
+@ 0.4

@@ -247,7 +247,7 @@ Cyphal remains the cart's control path; commands received here drive the same
   `T<float>` target wheel speed (-1..1 of the module's full-scale speed,
   clamped; `G16` reads that full scale back), `Q<float>` open-loop voltage (V),
   `E<0|1>` driver enable, `X` zero both set-points, `M<rate>` telemetry rate in
-  Hz (0 = off, max 100), `S` one status line, `K` loop-trace counters,
+  Hz (0 = off, max 100), `S` one status line, `K` the stop/limit counters,
   `W`/`W<0|1>` dump / arm the loop trace, `?` command list. Anything else
   answers `ERR <line>`.
 - Status and telemetry share one format: `S t=<-1..1> v=<rad/s> e=<0|1> f=<FAULT>`,
@@ -311,3 +311,20 @@ Cyphal remains the cart's control path; commands received here drive the same
   `radapter radapter/examples/serial/serial_repl.lua /dev/ttyACM0` forwards
   every stdin line to the port and prints the replies to stdout (empty line =
   `S`, `:q` quits). Shutdown zeroes the set-points and disables the driver.
+- Bench scripts live in `debug/`: `bench.py` is the line client
+  (`python3 debug/bench.py script debug/bench_speed_sweep.txt`, port from
+  `$BENCH_PORT`), `bench_speed_sweep.txt` holds steady speeds to fit the EMF
+  constant against the applied q-voltage, and `bench_maxspeed_hold.txt` holds
+  full scale both directions with the trace armed. Both park the drive at the
+  end.
+- `K` answers one counter per mechanism that can stop the drive or take
+  authority from a regulator (`K1` hall: illegal transitions, counted edges,
+  angle calls, implausible rates, sector pulls, 0/2pi wraps; `K2` stop: guard
+  overcurrent/stall, derate rail-high/rail-low, driver faults, coasts; `K3`
+  limit: target clamps, current-limit and voltage-limit episodes, brake clamp,
+  regulator resets; `K4` loop: periods over budget, the worst one, and
+  free-store allocations made while the loop ran). Read it before and after an
+  event and the counter that moved names the mechanism. Sector pulls track the
+  edge count (~1 per edge) by construction; 0/2pi wraps run at one per rotor
+  revolution. The loop makes no heap allocations — `heap=` reports the count
+  and the worst call, measured through the allocator wrappers.
