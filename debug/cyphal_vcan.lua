@@ -115,7 +115,7 @@ each(20, function()
     end
 end)
 
--- ---- cart.lua's publish helpers, unchanged ----------------------------------
+-- ---- cart.lua's publish helpers, simplified copies (no stop organ, no log) ---
 local function wheel_command(wheel_m_s)
     local full_scale = config_defs.max_speed.default
     return math.max(-1.0, math.min(1.0, full_scale > 0 and (wheel_m_s / full_scale) or 0.0))
