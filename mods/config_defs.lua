@@ -20,9 +20,11 @@
 --  compiled default and regulates a q-current; the six-step build interprets
 --  the same numbers as V-based gains instead.  A gain expressed per m/s would
 --  need a per-wheel-radius conversion the module does not do — see "CAN config
---  coverage" in firmware/README.md.  The numbers are therefore gain-per-rad/s;
---  These defaults track the SimpleFOC bench tuning in motor_tuning.h; a
---  wheel's EEPROM overrides them until edited here.
+--  coverage" in firmware/README.md.  The numbers are therefore gain-per-rad/s,
+--  and this table tracks the SimpleFOC bench tuning in motor_tuning.h (a
+--  six-step build compiles its own V-based defaults, so a factory-fresh
+--  six-step module reports different numbers until this table is sent to it).
+--  A wheel's EEPROM record overrides these defaults until edited here.
 --
 --  The wheel-diameter default mirrors the compiled-in `BOOT_WHEEL_RADIUS_M * 2`
 --  in firmware/App/app.cpp.
@@ -33,7 +35,12 @@ return {
     pid_kp         = { id = 1, label = "Velocity Kp",     unit = "A/(rad/s)",   default = 2.10, min = 0.0,  max = 50,  step = 0.01 },
     pid_ki         = { id = 2, label = "Velocity Ki",     unit = "A/(rad/s·s)", default = 1.11, min = 0.0,  max = 50,  step = 0.01 },
     pid_kd         = { id = 3, label = "Velocity Kd",     unit = "A·s/(rad/s)", default = 0.00, min = 0.0,  max = 50,  step = 0.01 },
-    pid_i_limit    = { id = 4, label = "Integral limit",  unit = "A",           default = 7.3,  min = 0.0,  max = 24,  step = 0.1  },
+    -- The output-domain integral clamp: the firmware derives it as
+    -- ki * integral_error_lim = 1.11 * 10.0, which is what a fresh module
+    -- reports on G4. SimpleFOC's PID ignores it (it clamps the integral with
+    -- the whole output), so on the default build it only has to stay in step
+    -- with that derived value.
+    pid_i_limit    = { id = 4, label = "Integral limit",  unit = "A",           default = 11.1, min = 0.0,  max = 24,  step = 0.1  },
 
     -- Current guard (overcurrent / stall protection). The overcurrent ids
     -- (5..8) apply to every backend that measures phase current (six-step and
@@ -65,10 +72,10 @@ return {
     brake_current  = { id = 15, label = "Brake current", unit = "A",    default = 2.2,  min = 0,    max = 8,    step = 0.1  },
 
     -- Full-scale wheel speed (id 16): every speed command is normalized, -1..1,
-    -- and the module scales it with this value. The unit is m/s at the wheel;
-    -- The firmware derives its boot value from the drive's EMF constant and the
-    -- live modulation ceiling; a stored EEPROM value or this table sets the
-    -- command span. A command cannot exceed the live ceiling: the module clamps, so the cart
-    -- cannot ask for a speed the drive has no voltage to regulate.
+    -- and the module scales it with this value. The unit is m/s at the wheel.
+    -- The firmware derives its own boot value from the drive's EMF constant and
+    -- the live modulation ceiling, and clamps every command to that ceiling, so
+    -- neither this table nor a stored EEPROM value can ask for a speed the
+    -- drive has no voltage to regulate.
     max_speed      = { id = 16, label = "Max wheel speed", unit = "m/s", default = 0.50, min = 0.01, max = 2.0, step = 0.005 },
 }
