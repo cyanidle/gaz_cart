@@ -81,18 +81,23 @@ Item {
             if (root.diagnostics) {
                 iqSeries.append(chartTime, d.iq || 0)
                 uqSeries.append(chartTime, d.uq || 0)
+                udSeries.append(chartTime, d.ud || 0)
+                imSeries.append(chartTime, d.im || 0)
                 busSeries.append(chartTime, d.bus || 0)
             }
             var cutoff = chartTime - 20.0
             while (tgtSeries.count > 0 && tgtSeries.at(0).x < cutoff) {
                 tgtSeries.remove(0); actSeries.remove(0)
-                if (root.diagnostics) { iqSeries.remove(0); uqSeries.remove(0); busSeries.remove(0) }
+                if (root.diagnostics) {
+                    iqSeries.remove(0); uqSeries.remove(0)
+                    udSeries.remove(0); imSeries.remove(0); busSeries.remove(0)
+                }
             }
             scroll(speedX)
             rescale(speedY, [tgtSeries, actSeries])
             if (root.diagnostics) {
                 scroll(auxX)
-                rescale(auxY, [iqSeries, uqSeries])
+                rescale(auxY, [iqSeries, uqSeries, udSeries, imSeries])
             }
         }
     }
@@ -217,7 +222,7 @@ Item {
                 antialiasing: true
                 theme: ChartView.ChartThemeLight
                 legend.alignment: Qt.AlignTop
-                title: "q current (A) and q voltage (V)"
+                title: "currents (A) and d/q voltages (V)"
 
                 ValueAxis {
                     id: auxX
@@ -243,6 +248,22 @@ Item {
                     objectName: "uqSeries"
                     name: "uq (V)"
                     color: "#8e44ad"
+                    width: 1
+                    axisX: auxX; axisY: auxY
+                }
+                LineSeries {
+                    id: udSeries
+                    objectName: "udSeries"
+                    name: "ud (V)"
+                    color: "#d35400"
+                    width: 1
+                    axisX: auxX; axisY: auxY
+                }
+                LineSeries {
+                    id: imSeries
+                    objectName: "imSeries"
+                    name: "|i| phase (A)"
+                    color: "#16a085"
                     width: 1
                     axisX: auxX; axisY: auxY
                 }
@@ -548,6 +569,7 @@ Item {
                         ParamHelp {
                             id: help
                             parent: paramRow
+                            value: paramSlider.value
                             x: 0
                             // Below the row, or above it when the window has no
                             // room left below — a row near the bottom would

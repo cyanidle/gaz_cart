@@ -82,7 +82,6 @@ function Tuner.new(opts)
     self.max_speed_m_s = config_defs.max_speed.default
     self.wheel_diameter_m = config_defs.wheel_diameter.default
     self.on_config_sent = opts.on_config_sent
-    self.log_file = opts.log_file
 
     self.view = QML { url = opts.view or (REPO_DIR .. "/qml/TunerWindow.qml") }
 
@@ -147,6 +146,8 @@ function Tuner:_select_wheel(name)
     self.client { action = "state" }
 end
 
+---Track a value the operator set, without echoing the parameter list back: the
+---slider is under the operator's hand, and a model reset would drop the drag.
 function Tuner:_set_value(id, value)
     local param = self.by_id[id]
     if not param then return end
@@ -158,28 +159,22 @@ function Tuner:_set_value(id, value)
         self.max_speed_m_s = value
         self.view { max_speed_mps = value }
     end
-    self.view { params = self.params }
 end
 
 ---Commands the view sends; the transport decides how each one travels.
 function Tuner:_on_view(msg)
     if msg.set then
-        for _, param in ipairs(self.params) do
-            if param.id == msg.set.id then param.value = msg.set.value end
-        end
+        self:_set_value(msg.set.id, msg.set.value)
         self:_send_config(msg.set.id, msg.set.value)
     elseif msg.wheel ~= nil then
         self:_select_wheel(msg.wheel)
     elseif msg.target ~= nil then
-        local target = math.max(-1.0, math.min(1.0, msg.target))
-        self.latest_target = target
-        self:_send_target(target)
+        self:_send_target(math.max(-1.0, math.min(1.0, msg.target)))
     elseif msg.voltage ~= nil then
         self:_send_voltage(msg.voltage)
     elseif msg.enable ~= nil then
         self:_send_enable(msg.enable == true)
     elseif msg.zero then
-        self.latest_target = 0.0
         self:_send_target(0.0)
         self:_send_voltage(0.0)
     elseif msg.readback then
@@ -270,7 +265,8 @@ function Tuner:_on_serial_line(line)
             diag = {
                 tgt_m_s = fields.t or 0.0,
                 act_m_s = (fields.v or 0.0) * radius,
-                iq = fields.iq, uq = fields.uq, bus = fields.b, t_ms = fields.n,
+                iq = fields.iq, uq = fields.uq, ud = fields.ud, im = fields.im,
+                bus = fields.b, t_ms = fields.n,
             },
         }
         local fault = FAULT_NAMES[math.floor((fields.f or 0) + 0.5) + 1] or "?"
@@ -317,13 +313,8 @@ function Tuner:_apply_read_back()
     for _, param in ipairs(self.params) do
         local value = self.values and self.values[param.id]
         if value ~= nil then
-            param.value = value
+            self:_set_value(param.id, value)
             changed = true
-            if param.id == config_defs.wheel_diameter.id then
-                self.wheel_diameter_m = value
-            elseif param.id == config_defs.max_speed.id then
-                self.max_speed_m_s = value
-            end
         end
     end
     self.view {
@@ -409,6 +400,7 @@ function Tuner:_open_can(opts)
     end)
 
     pipe(self.client, function(msg)
+        if self.closing then return end
         local state = msg.state
         if not state then return end
         local wheels = state.wheels or {}
@@ -420,7 +412,7 @@ function Tuner:_open_can(opts)
             status = fmt("{}: target {:.3f} m/s   actual {:.3f} m/s",
                 self.wheel, tgt, act),
         }
-        if state.joystick and state.joystick.stop then
+        if state.joystick and state.joystick.stopped then
             self.view { status = fmt("{}: stop organ engaged (cart parked)", self.wheel) }
         end
     end)

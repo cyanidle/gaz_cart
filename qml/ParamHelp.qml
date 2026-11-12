@@ -4,15 +4,16 @@ import QtQuick.Layouts
 
 // Hover help for one tuner parameter: what the knob does, plus a small sketch
 // of that effect drawn from the parameter's current value. The sketch kinds
-// come from mods/tuner_help.lua (`chart`); every kind has a branch in paint().
+// come from mods/tuner_help.lua (`chart`); every kind has a branch in
+// drawSketch().
 Popup {
     id: root
     objectName: "paramHelp"
 
     property var param
-    // 0..1 position of the parameter inside its range, so the sketch moves with
-    // the slider instead of being a static picture.
-    property real t: 0
+    // The parameter's live value, so the sketch moves with the slider instead of
+    // being a static picture (the row's own modelData copy is a snapshot).
+    property real value: 0
 
     width: 470
     padding: 10
@@ -24,8 +25,8 @@ Popup {
         if (!param) return 0
         var span = param.max - param.min
         if (!(span > 0)) return 0
-        var t = (param.value - param.min) / span
-        return Math.max(0, Math.min(1, t))
+        var frac = (value - param.min) / span
+        return Math.max(0, Math.min(1, frac))
     }
 
     function helpText() {
@@ -50,6 +51,8 @@ Popup {
         Canvas {
             id: sketch
             objectName: "helpSketch"
+            // the tester reads this to prove the sketch follows the value
+            property real normalized: root.normalized()
             Layout.fillWidth: true
             Layout.preferredHeight: 104
             antialiasing: true
@@ -61,9 +64,7 @@ Popup {
             Connections {
                 target: root
                 function onParamChanged() { sketch.requestPaint() }
-            }
-            Connections {
-                target: root
+                function onValueChanged() { sketch.requestPaint() }
                 function onVisibleChanged() { if (root.visible) sketch.requestPaint() }
             }
             Component.onCompleted: requestPaint()
@@ -236,7 +237,7 @@ Popup {
                 ctx.beginPath(); ctx.moveTo(xk, mid2 - 5); ctx.lineTo(xk, mid2 + 5); ctx.stroke()
                 text(ticks[k].toFixed(1), xk - 8, mid2 + 18)
             }
-            var full = param && param.key === "max_speed" ? param.value : 0
+            var full = param && param.key === "max_speed" ? root.value : 0
             text("1.0 = " + full.toFixed(3) + " m/s", x0 + 6, y1 + 2)
             text("-1.0 = " + (-full).toFixed(3) + " m/s", x1 - 96, y1 + 2)
             break
@@ -249,7 +250,7 @@ Popup {
             ctx.lineWidth = 2
             ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke()
             ctx.beginPath(); ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy); ctx.stroke()
-            var d = param ? param.value : 0
+            var d = root.value
             text("d = " + d.toFixed(3) + " m", x0 + 92, cy - 6)
             text("circumference " + (Math.PI * d).toFixed(3) + " m per turn", x0 + 92, cy + 10)
             break

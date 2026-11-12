@@ -19,6 +19,8 @@ local config_defs = require "mods.config_defs"
 local tuner_help = require "mods.tuner_help"
 
 local received = {}
+-- flipped mid-test to prove the tuner reports the stop organ
+local stop_engaged = false
 local server = WebsocketServer { name = "fake_cart", port = PORT, protocol = "msgpack" }
 pipe(server, function(msg)
     -- a listener message is a lazy view (userdata), not a table: snapshot it
@@ -32,7 +34,7 @@ pipe(server, function(msg)
                 rl = { tgt = 0.0, act = 0.0, travel = 0.0 },
                 rr = { tgt = 0.0, act = 0.0, travel = 0.0 },
             },
-            joystick = { stop = false },
+            joystick = { stopped = stop_engaged },
         },
     }
 end)
@@ -74,6 +76,16 @@ local telemetry = tostring(qt:prop("telemetryLabel", "text"))
 assert(telemetry:find("0.200") or telemetry:find("0.18"),
     "the per-wheel state snapshot did not reach the view: " .. telemetry)
 
+-- ---- the joystick stop organ is reported ------------------------------------
+stop_engaged = true
+mark = #received
+qt:click_item("resetBtn") -- any command makes the fake cart publish a snapshot
+qt:wait(400)
+local stopped_text = tostring(qt:prop("telemetryLabel", "text"))
+assert(stopped_text:find("stop organ"), "the tuner does not report an engaged stop organ: " .. stopped_text)
+stop_engaged = false
+qt:wait(200)
+
 -- ---- wheel selector ----------------------------------------------------------
 assert(qt:prop("tuneWheelBox", "count") == 4, "the wheel selector does not list four wheels")
 assert(qt:prop("tuneWheelBox", "currentIndex") == 0, "the wheel selector does not start on fl")
@@ -100,6 +112,21 @@ for _, key in ipairs({ "pid_kp", "pid_ki", "max_speed", "wheel_diameter", "oc_pe
     qt:move(5, 5)
     qt:wait(120)
 end
+-- the sketch must follow the value, not freeze at the row's snapshot
+local function sketch_fraction(key, value)
+    hover("paramlabel_" .. key)
+    qt:set_prop("param_" .. key, "value", value)
+    qt:wait(250)
+    return tonumber(tostring(qt:prop("helpSketch", "normalized")))
+end
+
+local low = sketch_fraction("oc_peak_a", 4.0)
+local high = sketch_fraction("oc_peak_a", 36.0)
+print(("sketch fraction: %.2f at 4 A, %.2f at 36 A"):format(low, high))
+assert(low and high and high > low + 0.3, "the hover sketch does not follow the parameter value")
+qt:move(5, 5)
+qt:wait(150)
+
 local distinct = 0
 for _ in pairs(seen) do distinct = distinct + 1 end
 assert(distinct == 6, "the parameter rows share one help text")
