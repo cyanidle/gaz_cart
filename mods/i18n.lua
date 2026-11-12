@@ -140,7 +140,18 @@ end
 function i18n.text(key)
     local entry = TEXT[key]
     if not entry then error(("no localized text for '%s'"):format(key)) end
-    return entry[i18n.lang] or entry.en
+    local text = entry[i18n.lang]
+    if not text then error(("no %s text for '%s'"):format(i18n.lang, key)) end
+    return text
+end
+
+---Every text key this module carries, for the guards that check both languages.
+---@return string[]
+function i18n.keys()
+    local keys = {}
+    for key in pairs(TEXT) do keys[#keys + 1] = key end
+    table.sort(keys)
+    return keys
 end
 
 ---`i18n.text(key)` through radapter's `fmt`, for the lines that carry values.
@@ -152,7 +163,9 @@ end
 ---@param def table config_defs entry
 ---@return string
 function i18n.label(def)
-    if i18n.lang == "ru" then return def.label_ru or def.label end
+    if i18n.lang == "ru" then
+        return assert(def.label_ru, ("config_defs id %s has no label_ru"):format(tostring(def.id)))
+    end
     return def.label
 end
 
@@ -160,7 +173,9 @@ end
 ---@param def table config_defs entry
 ---@return string
 function i18n.unit(def)
-    if i18n.lang == "ru" then return def.unit_ru or def.unit end
+    if i18n.lang == "ru" then
+        return assert(def.unit_ru, ("config_defs id %s has no unit_ru"):format(tostring(def.id)))
+    end
     return def.unit
 end
 
@@ -168,8 +183,9 @@ end
 ---@param entry table tuner_help entry
 ---@return string
 function i18n.help(entry)
-    local what = entry.what
-    return what[i18n.lang] or what.en
+    local text = entry.what[i18n.lang]
+    if not text then error(("no %s hover help for '%s'"):format(i18n.lang, tostring(entry.key))) end
+    return text
 end
 
 return i18n

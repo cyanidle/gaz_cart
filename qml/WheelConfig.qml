@@ -29,15 +29,15 @@ Item {
     property string lang: Tr.lang
     onLangChanged: refreshWheelNames()
     function refreshWheelNames() {
-        var names = [Tr.t("wheel_all"), "fl", "fr", "rl", "rr"]
-        if (wheelChoices.count !== names.length) {
+        if (wheelChoices.count !== root.wheels.length + 1) {
             wheelChoices.clear()
-            for (var i = 0; i < names.length; i++) {
-                wheelChoices.append({ id: i === 0 ? "all" : names[i], name: names[i] })
+            wheelChoices.append({ id: "all", name: Tr.t("wheel_all") })
+            for (var i = 0; i < root.wheels.length; i++) {
+                wheelChoices.append({ id: root.wheels[i], name: root.wheels[i] })
             }
             return
         }
-        for (var j = 0; j < names.length; j++) wheelChoices.setProperty(j, "name", names[j])
+        wheelChoices.setProperty(0, "name", Tr.t("wheel_all"))
     }
 
     // Feed new speed samples into the chart series at ~20 Hz.  Maintain a

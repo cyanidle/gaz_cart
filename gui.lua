@@ -151,6 +151,15 @@ local cfgView    = QML { url = "./qml/WheelConfigWindow.qml" }
 local navView    = QML { url = "./qml/NavWindow.qml" }
 local teleopView = QML { url = "./qml/TeleopWindow.qml" }
 
+-- The last map-I/O line is kept as its key and arguments, not as text: a
+-- language throw re-renders it instead of leaving the old language on screen.
+local nav_io
+local function nav_status(key, ...)
+    local args = table.pack(...)
+    nav_io = { key = key, args = args }
+    navView { nav = { map_io_status = i18n.fmt(key, table.unpack(args, 1, args.n)) } }
+end
+
 -- ---- Language ----------------------------------------------------------------
 -- The window chrome switches inside QML, on the Tr singleton every window
 -- binds to; what the *models* carry — parameter names and units, nav status
@@ -193,6 +202,10 @@ local function take_lang(msg)
         i18n.set(lang)
         push_params()
     end
+    if nav_io then
+        local args = nav_io.args
+        nav_status(nav_io.key, table.unpack(args, 1, args.n))
+    end
     log.info("gui: language {}", i18n.lang)
     return true
 end
@@ -229,9 +242,6 @@ local function local_file_path(url)
         return string.char(tonumber(hex, 16))
     end))
 end
-local function nav_status(text)
-    navView { nav = { map_io_status = text } }
-end
 local function nav_outgoing(msg)
     if take_lang(msg) then return nil end
     local nav = msg.nav
@@ -240,18 +250,18 @@ local function nav_outgoing(msg)
         local path = local_file_path(nav.load_map_file)
         local file, err = io.open(path, "rb")
         if not file then
-            nav_status(i18n.fmt("map_load_failed", tostring(err)))
+            nav_status("map_load_failed", tostring(err))
             return nil
         end
         local payload = bytes(file:read("a"))
         file:close()
-        nav_status(i18n.fmt("map_uploading", path))
+        nav_status("map_uploading", path)
         client { nav = { load_map = payload } }
         return nil
     end
     if nav.dump_map_file then
         pending_map_dump = local_file_path(nav.dump_map_file)
-        nav_status(i18n.text("map_requesting"))
+        nav_status("map_requesting")
         client { nav = { dump_map = true } }
         return nil
     end
@@ -277,9 +287,9 @@ pipe(client, function(msg)
             if file then
                 file:write(msg.nav.map_image:str())
                 file:close()
-                nav_status(i18n.fmt("map_saved", pending_map_dump))
+                nav_status("map_saved", pending_map_dump)
             else
-                nav_status(i18n.fmt("map_save_failed", tostring(err)))
+                nav_status("map_save_failed", tostring(err))
             end
             pending_map_dump = nil
         end

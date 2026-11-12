@@ -110,23 +110,14 @@ for key in pairs(ru) do
     end
 end
 
--- the Lua side: every text it can hand a view has both languages
+-- the Lua side: every text the module carries has both languages (the list comes
+-- from the module itself, so a new key without a Russian entry cannot slip past)
 local lua_texts = 0
+local lua_keys = i18n.keys()
+assert(#lua_keys > 30, ("mods/i18n.lua carries only %d texts"):format(#lua_keys))
 for _, lang in ipairs(i18n.langs) do
     i18n.set(lang)
-    for _, key in ipairs({
-        "status_probing", "status_no_answer", "status_nothing_attached",
-        "status_serial", "status_connected", "status_wheel", "status_service",
-        "status_connecting", "status_link",
-        "status_readback_serial_only", "status_enable_cart", "status_console_serial",
-        "status_one_module", "status_target", "status_stopped", "status_rejected",
-        "diag_v1", "diag_status", "driver_on", "driver_off", "enabled", "disabled",
-        "fault_none", "fault_invalid_hall", "fault_invalid_supply",
-        "fault_invalid_command", "fault_stalled", "fault_overcurrent", "fault_driver",
-        "fault_unknown",
-        "map_load_failed", "map_uploading", "map_saved", "map_save_failed",
-        "map_requesting",
-    }) do
+    for _, key in ipairs(lua_keys) do
         assert(#i18n.text(key) > 1, ("mods/i18n.lua: '%s' has no %s text"):format(key, lang))
         lua_texts = lua_texts + 1
     end

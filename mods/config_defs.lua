@@ -32,8 +32,7 @@
 -- =============================================================================
 
 return {
-    -- Every entry carries the English `label`/`unit` and the Russian
-    -- `label_ru`/`unit_ru` that tests/tuner_help.lua requires.
+    -- tests/tuner_help.lua requires label_ru/unit_ru beside every label/unit.
     wheel_diameter = {
         id = 0, label = "Wheel diameter", label_ru = "Диаметр колеса",
         unit = "m", unit_ru = "м",

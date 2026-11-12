@@ -107,13 +107,25 @@ function Tuner.new(opts)
         lang = i18n.lang,
     }
 
+    -- The serial probe can take 20 s: a language throw must not fall on the
+    -- floor meanwhile, while anything that would touch the transport has to
+    -- wait until it exists.
+    self.opening = true
+    pipe(self.view, function(msg)
+        if self.opening then
+            if msg.lang ~= nil then self:set_lang(msg.lang) end
+            return nil
+        end
+        return self:_on_view(msg)
+    end)
+
     if self.transport == "serial" then
         self:_open_serial(opts)
     else
         self:_open_can(opts)
     end
 
-    pipe(self.view, function(msg) return self:_on_view(msg) end)
+    self.opening = false
     return self
 end
 
