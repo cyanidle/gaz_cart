@@ -1,18 +1,92 @@
 -- =============================================================================
 --  Config + tuning GUI for the cart — runs on a laptop / desktop and connects
---  to main.lua's websocket to tune each wheel module's runtime config live.
+--  to cart.lua's websocket to tune each wheel module's runtime config live.
 --
---      radapter --gui gui.lua [ws://HOST:PORT]
+--      radapter --gui gui.lua [ws://HOST:PORT] [service=ws://HOST:PORT]
+--                             [serial=/dev/ttyACM0] [wheel=fl] [tune=0]
 --
 --  Defaults to ws://127.0.0.1:6080.  Pick a wheel (or "all"), type a value
 --  and press Enter — it goes to the module(s) immediately.  The chart shows
 --  target vs actual speed for the selected wheel so you can tune the velocity
 --  PID with instant visual feedback.
+--
+--  The tune window is the one bench tuner (mods/tuner.lua + qml/TunerWindow.qml,
+--  the same window debug/tune.lua opens): sliders for every runtime config value
+--  with hover help, a normalized target-speed slider and an open-loop voltage
+--  slider, and charts. Over CAN it drives one wheel through the cart's service
+--  channel (port 6081, the only channel that takes a single-wheel speed and a
+--  direct voltage); `serial=/dev/ttyACM0` points the very same window at a
+--  module's bench channel instead, with per-phase diagnostics and read-back.
 -- =============================================================================
 
 local config_defs = require "mods.config_defs"
+local tuner_mod   = require "mods.tuner"
 
-local url    = args[1] or "ws://127.0.0.1:6080"
+-- ---- Command line ------------------------------------------------------------
+local USAGE = [[
+usage: radapter --gui gui.lua [ws://HOST:PORT] [service=ws://HOST:PORT]
+                       [serial=/dev/ttyACM0] [wheel=fl] [tune=0]
+
+  ws://HOST:PORT  cart control websocket (default ws://127.0.0.1:6080)
+  service         cart service websocket the tuner drives (default: the ws host,
+                  port 6081)
+  serial          module bench port — the tune window talks to that module
+                  directly instead of through the cart
+  wheel           wheel the tune window drives over CAN (fl/fr/rl/rr, default fl)
+  tune            tune=0 leaves the tune window closed
+]]
+
+local opts = {
+    ws = "ws://127.0.0.1:6080",
+    service = nil,
+    serial = nil,
+    wheel = "fl",
+    tune = true,
+}
+
+local OPTION_KINDS = { ws = "url", service = "url", serial = "url", wheel = "word", tune = "flag" }
+
+local function set_option(key, value)
+    local kind = OPTION_KINDS[key]
+    if not kind then
+        error(("unknown option '%s'; run with the argument 'help' to list them"):format(key))
+    end
+    if kind == "flag" then
+        opts[key] = value == nil or (value ~= "0" and value ~= "false")
+    else
+        assert(value and value ~= "", ("%s expects a value"):format(key))
+        opts[key] = value
+    end
+end
+
+for _, arg in ipairs(args) do
+    if arg == "help" then
+        print(USAGE)
+        shutdown()
+        return
+    end
+    local key, value = arg:match("^([%w%-]+)=(.*)$")
+    if key then
+        set_option((key:gsub("%-", "_")), value)
+    elseif arg:match("^wss?://") then
+        opts.ws = arg
+    else
+        error(("unexpected argument '%s'; run with the argument 'help'"):format(arg))
+    end
+end
+
+--- The tuner's CAN transport speaks to cart.lua's service channel, which sits
+--- one port above the control websocket on the same host.
+local function service_url()
+    if opts.service then return opts.service end
+    local host = opts.ws:gsub("/+$", ""):match("^(wss?://[^:/]+)")
+    if not host then
+        error(("cannot derive the service channel from '%s'; pass service=ws://HOST:PORT"):format(opts.ws))
+    end
+    return fmt("{}:{}", host, 6081)
+end
+
+local url    = opts.ws
 local client = WebsocketClient { url = url, protocol = "msgpack" }
 
 -- ---- Sent-config persistence -------------------------------------------------
@@ -169,3 +243,29 @@ pipe(client, function(msg)
     navView(msg)
     teleopView(msg)
 end)
+
+-- ---- Tuner -------------------------------------------------------------------
+-- The bench tuner is the fourth window, over the transport the operator picked:
+-- the cart's service channel (CAN) by default, or a module's bench port with
+-- `serial=`. It is the same module and the same window debug/tune.lua opens.
+-- A config value it writes over CAN is remembered like any other, so a tuning
+-- survives the cart's restart through the replay above.
+local tuner
+if opts.tune then
+    local common = {
+        vmax = 10.0,
+        wheel = opts.wheel,
+        on_config_sent = function(wheel, id, value)
+            remember { wheel = wheel, id = id, value = value }
+        end,
+    }
+    if opts.serial then
+        common.transport = "serial"
+        common.port = opts.serial
+    else
+        common.transport = "can"
+        common.url = service_url()
+    end
+    tuner = tuner_mod.new(common)
+    on_shutdown(function() tuner:park() end)
+end

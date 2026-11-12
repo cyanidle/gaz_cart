@@ -26,7 +26,7 @@ elseif(GAZ_PACKAGE_TARGET STREQUAL "gui")
         RUNTIME DESTINATION bin COMPONENT gaz_gui_runtime
         LIBRARY DESTINATION lib COMPONENT gaz_gui_runtime)
     install(FILES gui.lua DESTINATION share/gaz-gui COMPONENT gaz_gui_runtime)
-    install(FILES mods/config_defs.lua
+    install(FILES mods/config_defs.lua mods/tuner.lua mods/tuner_help.lua
         DESTINATION share/gaz-gui/mods COMPONENT gaz_gui_runtime)
     install(DIRECTORY qml/ DESTINATION share/gaz-gui/qml COMPONENT gaz_gui_runtime)
     install(PROGRAMS scripts/gaz-gui DESTINATION bin COMPONENT gaz_gui_runtime)

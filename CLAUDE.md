@@ -42,6 +42,14 @@ tree dirty — every coherent step lands in a commit before you move on:
   that commanded a non-zero twist owns the wheels, and the joystick stop organ
   gates all of them. `mods/joystick_axes.lua` — axis shaping (deadzone, inversion)
   and the stop organ itself, shared by `nodes/joystick.lua` and `debug/motor.lua`.
+- `mods/tuner.lua` — **the** tuner, transport-agnostic: `Tuner.new{transport="can"}`
+  drives one wheel through `cart.lua`'s service channel, `transport="serial"` uses
+  a module's USART2 bench channel directly (read-back, per-phase diagnostics,
+  enable). `mods/tuner_help.lua` — per-parameter hover text plus the sketch kind
+  (`qml/ParamHelp.qml` draws it), checked against `config_defs` by
+  `tests/tuner_help.lua`. `qml/Tuner.qml` + `qml/TunerWindow.qml` — the one shared
+  window. `gui.lua` opens it (CAN by default, `serial=<port>` for a bench module)
+  and `debug/tune.lua` is a thin serial launcher over the same files.
 - `gui.lua` — config GUI; connects to `cart.lua`'s websocket from another host.
 - `joystick/` — native `gaz_joystick` plugin: a HID **source** worker for the
   Universal RC Joystick (`/dev/hidraw*`) that emits `{axes, buttons, raw}`.
@@ -185,9 +193,10 @@ Cart deployment on the RPi composes three pieces:
 
 Installed layout (`gaz-cart-gui`): `/usr/bin/radapter` (GUI build),
 `/usr/bin/gaz-gui` launcher, the shared SDK, `/usr/share/gaz-gui/gui.lua`,
-`qml/*.qml`, and `mods/config_defs.lua`. Sent-config state is persisted under
-`$XDG_DATA_HOME/gaz-gui/config.json` (the `GAZ_GUI_STATE` override), never
-under `/usr/share`.
+`qml/*.qml`, and the Lua modules `gui.lua` loads at runtime
+(`mods/config_defs.lua`, `mods/tuner.lua`, `mods/tuner_help.lua`). Sent-config
+state is persisted under `$XDG_DATA_HOME/gaz-gui/config.json` (the
+`GAZ_GUI_STATE` override), never under `/usr/share`.
 
 Only named runtime/plugin components are packaged, never `Unspecified` headers,
 static archives, GUI/QML, firmware, or the radapter test plugin. LuaSocket and

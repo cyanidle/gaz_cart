@@ -19,7 +19,9 @@ else()
     set(required
         bin/radapter bin/gaz-gui lib/libradapter-sdk.so
         share/gaz-gui/gui.lua share/gaz-gui/qml/WheelConfigWindow.qml
-        share/gaz-gui/mods/config_defs.lua)
+        share/gaz-gui/qml/TunerWindow.qml share/gaz-gui/qml/ParamHelp.qml
+        share/gaz-gui/mods/config_defs.lua share/gaz-gui/mods/tuner.lua
+        share/gaz-gui/mods/tuner_help.lua)
 endif()
 
 foreach(component IN LISTS components)
