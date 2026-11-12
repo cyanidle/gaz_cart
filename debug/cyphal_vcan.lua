@@ -14,7 +14,6 @@
 
 package.path = SCRIPT_DIR .. "/../?.lua;" .. package.path
 
-local socket      = require "socket"
 local config_defs = require "mods.config_defs"
 local Rational    = require "mods.rational"
 local odo_node    = require "nodes.odo"
@@ -61,7 +60,11 @@ for w, nid in pairs(WHEELS) do
     publish  ["cfg_" .. w] = { type = "uavcan.primitive.array.Integer32.1.0", port = PORT.config     + nid }
 end
 
-local cart = Cyphal { can = new_can(), node_id = CART_NODE, subscribe = subscribe, publish = publish }
+local cart = Cyphal {
+    can = new_can(), node_id = CART_NODE,
+    node_info = { name = "gaz-cart-vcan-proof", software_version = { major = 7, minor = 3 } },
+    subscribe = subscribe, publish = publish,
+}
 
 local wheel_v = { fl = 0.0, fr = 0.0, rl = 0.0, rr = 0.0 }
 local wheel_travel = { fl = 0.0, fr = 0.0, rl = 0.0, rr = 0.0 }
@@ -173,9 +176,8 @@ local odo = odo_node {
 }
 
 -- ---- telemetry up ------------------------------------------------------------
-print(("wheels reporting: %d travel / %d speed messages in 2 s"):format(seen.trv, seen.spd))
 sleep(2000)
-print(("wheels reporting: %d travel / %d speed messages before the checks"):format(seen.trv, seen.spd))
+print(("wheels reporting: %d travel / %d speed messages"):format(seen.trv, seen.spd))
 check(seen.trv > 100 and seen.spd > 100, "all four modules' travel + linear speed reach the cart")
 check(math.abs(wheel_v.fl - WHEEL_SPEED) < 1e-3, "wheel speed value decodes (fl = what the module sent)")
 check(wheel_travel.fl > 0.4, "wheel travel accumulates (fl)")
@@ -217,9 +219,16 @@ end
 check(all_reached, "an all-wheel command reaches every module")
 
 -- ---- Cyphal itself: multi-frame transfers in both directions ---------------
+-- the answer has to carry the server's node info, not just arrive: GetInfo's
+-- request extent is zero, and a response subscription sized from it truncates
+-- the payload to defaults
 local res, err = modules[1].node:Request(
     { type = "uavcan.node.GetInfo.1.0", server = CART_NODE, port = 430 }, {}):await()
 check(res ~= nil and err == nil, ("module->cart GetInfo answered (%s)"):format(tostring(err)))
+check(res and res.name == "gaz-cart-vcan-proof",
+    ("GetInfo carries the node name (%s)"):format(res and tostring(res.name) or "no answer"))
+check(res and res.software_version and res.software_version.major == 7
+    and res.software_version.minor == 3, "GetInfo carries the software version")
 local res2, err2 = cart:Request(
     { type = "uavcan.node.GetInfo.1.0", server = 2, port = 430 }, {}):await()
 check(res2 ~= nil and err2 == nil, ("cart->module GetInfo answered (%s)"):format(tostring(err2)))
