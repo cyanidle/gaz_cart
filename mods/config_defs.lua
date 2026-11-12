@@ -11,7 +11,8 @@
 --  to the parameter selected by `id`.
 --
 --  **The `id`s MUST stay in sync with the `ConfigId` enum in
---  firmware/App/app.cpp.**  `default`/`min`/`max`/`step` only drive the GUI.
+--  firmware/App/config_ids.h** (tests/config_defs.lua checks that they are).
+--  `default`/`min`/`max`/`step` only drive the GUI.
 --
 --  **The gain units follow the backend's regulator, not the wire.**  The module
 --  façade converts m/s <-> rad/s with the wheel radius at its edge, so the

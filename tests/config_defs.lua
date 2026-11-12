@@ -66,5 +66,43 @@ assert(#leftovers == 0,
 assert(count == id_count,
     ("config_defs has %d ids, CFG_ID_COUNT is %d"):format(count, id_count))
 
-print("config_defs: ok (" .. count .. " ids)")
+-- The compiled-default backend is SimpleFOC, so the gain defaults and the
+-- derived integral clamp have to be the numbers a module reports on G4, not
+-- just plausible ones: id 4 is ki * integral_error_lim in the firmware.
+local pid = {}
+local in_simplefoc = false
+local tuning = assert(
+    io.open(SCRIPT_DIR .. "/../firmware/App/motor_tuning.h", "r"),
+    "cannot read firmware/App/motor_tuning.h"
+)
+for line in tuning:lines() do
+    if line:match("^#elif%s+defined%(VB_MOTOR_IMPL_SIMPLEFOC%)") then
+        in_simplefoc = true
+    elseif in_simplefoc and line:match("^#else") then
+        break
+    elseif in_simplefoc then
+        local field, value = line:match("^%s*%.([%w_]+)%s*=%s*([%d%.]+)f")
+        if field then
+            pid[field] = tonumber(value)
+        end
+    end
+end
+tuning:close()
+
+assert(pid.kp and pid.ki and pid.integral_error_lim,
+    "cannot parse the SimpleFOC velocity-PID defaults from motor_tuning.h")
+for _, case in ipairs {
+    { "pid_kp", pid.kp }, { "pid_ki", pid.ki }, { "pid_kd", pid.kd or 0.0 },
+} do
+    local key, firmware = case[1], case[2]
+    assert(math.abs(defs[key].default - firmware) < 1e-9,
+        ("default mismatch for %s: config_defs %s, firmware %s")
+            :format(key, defs[key].default, firmware))
+end
+local i_limit = pid.ki * pid.integral_error_lim
+assert(math.abs(defs.pid_i_limit.default - i_limit) < 1e-9,
+    ("default mismatch for pid_i_limit: config_defs %s, firmware ki * integral_error_lim = %s")
+        :format(defs.pid_i_limit.default, i_limit))
+
+print("config_defs: ok (" .. count .. " ids, gains match the SimpleFOC defaults)")
 os.exit(0)
