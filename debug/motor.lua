@@ -2,9 +2,10 @@
 --  debug/motor.lua — drive one wheel module from the HID joystick.
 --
 --  gaz_joystick (/dev/hidraw5) -> USART2 bench channel of a module
---  (/dev/ttyACM0): the chosen axis sets the target wheel speed in m/s, clamped
---  to +-max and rescaled from a deadzone around the centre. The script enables
---  the driver once the board answers and parks it on exit (T0, X, E0).
+--  (/dev/ttyACM0): the chosen axis sets the NORMALIZED wheel speed target
+--  (-1..1 of the module's configured full-scale speed, config id 16), rescaled
+--  from a deadzone around the centre. The script enables the driver once the
+--  board answers and parks it on exit (T0, X, E0).
 --
 --  The stop switch is an axis at its low extreme (slider = -1 by default):
 --  below stop-below the drive gets T0, X, E0 and stays disabled, above
@@ -13,7 +14,7 @@
 --  drive is also held at zero when joystick reports stop arriving for 0.5 s.
 --
 --    build/bin/radapter debug/motor.lua [port=/dev/ttyACM0] [hidraw=/dev/hidraw5]
---        [axis=y] [invert] [max=2] [deadzone=0.05]
+--        [axis=y] [invert] [deadzone=0.05]
 --        [stop-axis=slider] [stop-below=-0.8] [resume-above=-0.5]
 --
 --  Options are `key=value` words, because radapter's own CLI owns the dashed
@@ -22,7 +23,7 @@
 
 local USAGE = [[
 usage: radapter debug/motor.lua [port=/dev/ttyACM0] [hidraw=/dev/hidraw5]
-                                [axis=y] [invert] [max=2] [deadzone=0.05]
+                                [axis=y] [invert] [deadzone=0.05]
                                 [stop-axis=slider] [stop-below=-0.8]
                                 [resume-above=-0.5]
 
@@ -30,11 +31,14 @@ usage: radapter debug/motor.lua [port=/dev/ttyACM0] [hidraw=/dev/hidraw5]
   hidraw         joystick hidraw node
   axis           joystick axis that sets the speed (x, y, z, rx, ry, rz, slider, dial)
   invert         flip the axis direction
-  max            speed at full deflection, m/s
   deadzone       normalized deadzone around the axis centre, 0..1
   stop-axis      axis used as the stop switch; empty string disables it
   stop-below     stop-axis value at or below which the drive is parked
   resume-above   stop-axis value at or above which the drive is enabled again
+
+Full deflection commands -1 or +1: the module scales that with its own
+full-scale wheel speed (config id 16, readable as `G16`), so the same script
+drives a module at any configured top speed.
 ]]
 
 for _, arg in ipairs(args) do
@@ -50,7 +54,6 @@ local opts = {
     hidraw = "/dev/hidraw5",
     axis = "y",
     invert = false,
-    max = 2.0,
     deadzone = 0.05,
     stop_axis = "slider",
     stop_below = -0.8,
@@ -87,7 +90,6 @@ for _, arg in ipairs(args) do
     end
 end
 
-if opts.max <= 0 then error("max must be positive") end
 if opts.deadzone < 0 or opts.deadzone >= 1 then error("deadzone must be in 0..1") end
 if opts.stop_below >= opts.resume_above then
     error("stop-below must be lower than resume-above, otherwise the switch has no hysteresis")
@@ -122,19 +124,18 @@ local function command(line)
     motor(line)
 end
 
+-- `speed` is the normalized -1..1 command; the module owns the m/s mapping.
 local function drive(speed, force)
-    speed = math.max(-opts.max, math.min(opts.max, speed))
+    speed = math.max(-1.0, math.min(1.0, speed))
     if not force and math.abs(speed - target) < 0.01 then return end
     target = speed
     motor(("T%.3f"):format(speed))
 end
 
 ---@param axes table<string, number>
----@return number? m/s, nil when the joystick has no such axis
+---@return number? normalized -1..1 command, nil when the joystick has no such axis
 local function speed_of(axes)
-    local value = JoystickAxes.value(axes, opts.axis, opts.invert, opts.deadzone)
-    if value == nil then return nil end
-    return value * opts.max
+    return JoystickAxes.value(axes, opts.axis, opts.invert, opts.deadzone)
 end
 
 ---Stop switch read from an axis. The two thresholds give hysteresis, so a
@@ -163,8 +164,8 @@ local function arm()
     command("Q0")
     drive(0.0, true)
     armed = true
-    log.info("drive enabled: axis '{}' sets the wheel speed, +-{} m/s; stop when {} <= {}",
-        opts.axis, opts.max, opts.stop_axis, opts.stop_below)
+    log.info("drive enabled: axis '{}' sets the wheel speed, -1..1 of full scale; stop when {} <= {}",
+        opts.axis, opts.stop_axis, opts.stop_below)
 end
 
 pipe(motor, function(line)

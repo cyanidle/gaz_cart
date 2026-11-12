@@ -34,8 +34,13 @@ local TELEOP_MODE   = "auto"   -- "auto": joystick when it reports, else the GUI
 local TRACK_WIDTH   = 0.30     -- distance between left and right wheels, m
 local ODO_PERIOD_MS = 20       -- odometry integration period
 local TELEM_PERIOD_MS = 100    -- chart telemetry stream period
-local MAX_LIN_SPD  = 2       -- m/s at full forward command (v = 1.0)
-local MAX_ROT_SPD  = 3       -- rad/s at full turn command (omega = 1.0)
+-- Full-scale speeds. A wheel module takes a NORMALIZED -1..1 command and maps
+-- it onto its own configured full-scale speed (config id 16), so the cart's top
+-- speed is that module value: one place (config_defs) instead of two, and a
+-- wheel command past it is clamped by the module rather than by a stale
+-- constant here. The turn limit follows from the track width at that speed.
+local MAX_LIN_SPD  = config_defs.max_speed.default  -- m/s at full forward command (v = 1.0)
+local MAX_ROT_SPD  = 2 * MAX_LIN_SPD / TRACK_WIDTH  -- rad/s at full turn command (omega = 1.0)
 local JOYSTICK     = "/dev/hidraw0"     -- hidraw node of the URCJ, e.g. "/dev/hidraw5"; nil = no joystick
 local SIM_START_X  = 0.5     -- initial sim robot x, m
 local SIM_START_Y  = 0.5     -- initial sim robot y, m
@@ -69,7 +74,7 @@ local WHEELS = { fl = 1, fr = 2, rl = 3, rr = 4 }
 local PORT = {
     travel       = 7100,  -- module -> Pi, accumulated wheel travel, m
     linear_speed = 7300,  -- module -> Pi, m/s
-    speed_cmd    = 4000,  -- Pi -> module, m/s
+    speed_cmd    = 4000,  -- Pi -> module, normalized wheel speed, -1..1
     direct_cmd   = 4050,  -- Pi -> module, open-loop voltage (V)
     config       = 4100,  -- Pi -> module, { id, num, den }
 }
@@ -118,8 +123,17 @@ end
 
 -- ---- Driving ---------------------------------------------------------------
 
--- Per-wheel speed targets (m/s), set by the GUI or programmatically.
+-- Per-wheel speed targets (m/s), set by the GUI or programmatically. They stay
+-- physical here — odometry, the GUI charts and the service channel speak m/s —
+-- and are normalized once, at the Cyphal publish boundary below.
 local wheel_tgt = { fl = 0.0, fr = 0.0, rl = 0.0, rr = 0.0 }
+
+--- Normalize a wheel's m/s target for the module: -1..1 of its full-scale speed.
+local function wheel_command(wheel_m_s)
+    local full_scale = config_defs.max_speed.default
+    local normalized = full_scale > 0 and (wheel_m_s / full_scale) or 0.0
+    return math.max(-1.0, math.min(1.0, normalized))
+end
 
 -- Set by the drive arbiter below: while the joystick's stop organ is engaged
 -- the per-wheel debug paths refuse to spin the motors too.
@@ -135,11 +149,11 @@ local function set_speed(wheel, value)
     if not wheel or wheel == "all" then
         for w in pairs(WHEELS) do
             wheel_tgt[w] = value
-            msg["cmd_" .. w] = { value = value }
+            msg["cmd_" .. w] = { value = wheel_command(value) }
         end
     else
         wheel_tgt[wheel] = value
-        msg["cmd_" .. wheel] = { value = value }
+        msg["cmd_" .. wheel] = { value = wheel_command(value) }
     end
     log.info("set_speed {} -> {}", value, wheel or "all")
     cyphal(msg)
@@ -195,8 +209,10 @@ else
         wheel_tgt.fl, wheel_tgt.rl = wheel.fl, wheel.rl
         wheel_tgt.fr, wheel_tgt.rr = wheel.fr, wheel.rr
         cyphal {
-            cmd_fl = { value = wheel.fl }, cmd_rl = { value = wheel.rl },
-            cmd_fr = { value = wheel.fr }, cmd_rr = { value = wheel.rr },
+            cmd_fl = { value = wheel_command(wheel.fl) },
+            cmd_rl = { value = wheel_command(wheel.rl) },
+            cmd_fr = { value = wheel_command(wheel.fr) },
+            cmd_rr = { value = wheel_command(wheel.rr) },
         }
     end
 end

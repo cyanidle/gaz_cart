@@ -67,4 +67,13 @@ return {
     speed_ramp     = { id = 13, label = "Speed ramp",    unit = "m/s²", default = 2.0,  min = 0.05, max = 100,  step = 0.05 },
     torque_ramp    = { id = 14, label = "Torque ramp",   unit = "A/s",  default = 50,   min = 1,    max = 1000, step = 1    },
     brake_current  = { id = 15, label = "Brake current", unit = "A",    default = 1.0,  min = 0,    max = 8,    step = 0.1  },
+
+    -- Full-scale wheel speed (id 16): every speed command is normalized, -1..1,
+    -- and the module scales it with this value. The unit is m/s at the wheel;
+    -- the default is the speed a module regulates on its nominal rail (the
+    -- firmware derives its own boot value from the drive's EMF constant and the
+    -- live modulation ceiling, and a stored EEPROM value or this table lower it
+    -- further). A command cannot exceed it: the module clamps, so the cart
+    -- cannot ask for a speed the drive has no voltage to regulate.
+    max_speed      = { id = 16, label = "Max wheel speed", unit = "m/s", default = 0.25, min = 0.01, max = 2.0, step = 0.005 },
 }

@@ -226,7 +226,7 @@ Each module derives its ports from its (DIP-switch) node id:
 | 7100      | travel    | module →  | `uavcan.si.unit.length.Scalar`      | accumulated wheel travel since boot, m (signed) |
 | 7200      | velocity  | module →  | `uavcan.primitive.scalar.Real32`    | shaft angular vel, rad/s |
 | 7300      | linear    | module →  | `uavcan.primitive.scalar.Real32`    | wheel linear vel, m/s |
-| 4000      | speed cmd | → module  | `uavcan.primitive.scalar.Real32`    | target wheel speed, m/s |
+| 4000      | speed cmd | → module  | `uavcan.primitive.scalar.Real32`    | wheel speed command, -1..1 of the module's full-scale speed (config id 16) |
 | 4050      | direct cmd| → module  | `uavcan.primitive.scalar.Real32`    | open-loop voltage, V |
 | 4100      | config    | → module  | `uavcan.primitive.array.Integer32`  | `{id, numerator, denominator}` |
 
@@ -244,18 +244,29 @@ Cyphal remains the cart's control path; commands received here drive the same
 
 - One ASCII request per line, `\n`-terminated (`\r` ignored, blank lines
   skipped); every reply ends with `\r\n`:
-  `T<float>` target wheel speed (m/s), `Q<float>` open-loop voltage (V),
+  `T<float>` target wheel speed (-1..1 of the module's full-scale speed,
+  clamped; `G16` reads that full scale back), `Q<float>` open-loop voltage (V),
   `E<0|1>` driver enable, `X` zero both set-points, `M<rate>` telemetry rate in
   Hz (0 = off, max 100), `S` one status line, `K` loop-trace counters,
   `W`/`W<0|1>` dump / arm the loop trace, `?` command list. Anything else
   answers `ERR <line>`.
-- Status and telemetry share one format: `S t=<m/s> v=<rad/s> e=<0|1> f=<FAULT>`,
-  where `t` is the set-point last issued over this channel — a set-point sent
-  over Cyphal is not mirrored there. Backends with a current measurement
-  (SimpleFOC's d/q loop) append ` i=<A>`, the measured q-axis current. With
-  `V1` the telemetry tick sends ` D t=... v=... sp=... iq=... id=... im=...
-  uq=... ud=... b=... n=... f=... e=...` instead (`App/serial_line.h` lists the
-  fields).
+- Status and telemetry share one format: `S t=<-1..1> v=<rad/s> e=<0|1> f=<FAULT>`,
+  where `t` is the commanded normalized set-point (the module's commanded m/s
+  over its full-scale speed, whatever source issued it). Backends with a
+  current measurement (SimpleFOC's d/q loop) append ` i=<A>`, the measured
+  q-axis current. With `V1` the telemetry tick sends ` D t=... v=... sp=...
+  iq=... id=... im=... uq=... ud=... b=... n=... f=... e=...` instead
+  (`App/serial_line.h` lists the fields); there `t` is the applied physical
+  set-point in m/s, i.e. the ramp's output.
+- **Speed is normalized end to end**: every command source (serial `T`, Cyphal
+  4000, `cart.lua`) sends -1..1 of the module's configured full-scale wheel
+  speed (config id 16, `max_speed`, persisted in the EEPROM record version 5),
+  and the module alone maps it to m/s — wheel radius, gearbox ratio, back-EMF
+  constant and modulation ceiling. A fresh module boots with the speed its own
+  rail can regulate (`App/motor_limits.h`) and the live ceiling still bounds
+  whatever the configuration says, so no source can command a speed the drive
+  has no voltage for. Telemetry, travel (odometry) and the cart's internal
+  wheel-speed plumbing stay physical: m/s and m.
 - **Speed commands are clamped to what the rail can regulate.** `App/motor_limits.h`
   derives the reachable wheel rate from the live modulation ceiling and the
   drive's own EMF constant (`DriveInfo::torque_const * gear_ratio`, volts per

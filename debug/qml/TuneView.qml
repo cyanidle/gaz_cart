@@ -7,16 +7,27 @@ Item {
     id: root
 
     property var model
-    property real maxSpeed: model.max_speed ? model.max_speed : 1.0
+    // The module's configured full-scale wheel speed (config id 16, read back on
+    // connect): a normalized target of 1.0 commands this many m/s.
+    property real maxSpeedMps: model.max_speed_mps ? model.max_speed_mps : 0.25
     property real maxVoltage: model.max_voltage ? model.max_voltage : 6.0
     property double chartTime: 0
     property double lastSample: 0
+
+    // Shared row metric. Every row is label | slider | value field | unit with
+    // these three columns fixed, so the slider takes the same remainder in
+    // every row and all sliders and fields line up down the panel. A column
+    // left to its text width (the units did) makes each row distribute on its
+    // own and the rows drift apart.
+    property int rowLabelWidth: 170
+    property int rowFieldWidth: 90
+    property int rowUnitWidth: 80
 
     Component.onCompleted: {
         model.ensure("params")
         model.ensure("diag")
         model.ensure("status")
-        model.ensure("max_speed")
+        model.ensure("max_speed_mps")
         model.ensure("max_voltage")
     }
 
@@ -231,19 +242,23 @@ Item {
             Layout.fillWidth: true
             spacing: 8
 
-            Label { text: "Target speed"; Layout.preferredWidth: 110 }
+            Label { text: "Target speed"; Layout.preferredWidth: root.rowLabelWidth }
             Slider {
                 id: tgtSlider
                 objectName: "tgtSlider"
                 Layout.fillWidth: true
-                from: -root.maxSpeed; to: root.maxSpeed
+                // Normalized: -1..1 of the module's full-scale wheel speed. The
+                // m/s equivalent is shown next to it; the module owns the
+                // mapping, so the same slider drives a module at any top speed.
+                from: -1; to: 1
                 stepSize: 0.01
                 value: 0
                 snapMode: Slider.SnapAlways
                 property double lastSend: 0
                 function send() {
                     root.model.send({ target: value })
-                    statusLabel.text = "Target " + value.toFixed(3) + " m/s"
+                    statusLabel.text = "Target " + value.toFixed(3) + " x full scale = "
+                        + (value * root.maxSpeedMps).toFixed(3) + " m/s"
                 }
                 onMoved: {
                     var now = Date.now()
@@ -253,7 +268,7 @@ Item {
             }
             TextField {
                 id: tgtField
-                Layout.preferredWidth: 80
+                Layout.preferredWidth: root.rowFieldWidth
                 // Bound to the slider so a drag is visible here as well as on
                 // the handle; typing a value and pressing Enter moves the
                 // slider, which re-fires the binding.
@@ -262,18 +277,35 @@ Item {
                 onAccepted: {
                     var v = parseFloat(text)
                     if (isNaN(v)) return
-                    tgtSlider.value = Math.max(-root.maxSpeed, Math.min(root.maxSpeed, v))
+                    tgtSlider.value = Math.max(-1, Math.min(1, v))
                     tgtSlider.send()
                 }
             }
-            Label { text: "m/s"; color: "#888" }
+            Label {
+                objectName: "tgtMpsLabel"
+                Layout.preferredWidth: root.rowUnitWidth
+                text: (tgtSlider.value * root.maxSpeedMps).toFixed(3) + " m/s"
+                elide: Text.ElideRight
+                color: "#888"
+            }
+        }
+
+        // The full scale once, instead of repeating it in the row above: this is
+        // what a normalized 1.0 commands on the connected module.
+        Label {
+            objectName: "fullScaleLabel"
+            Layout.fillWidth: true
+            text: "Target speed is normalized (-1..1 of the module's full scale): 1.0 = "
+                + root.maxSpeedMps.toFixed(3) + " m/s (config id 16, G16)"
+            color: "#888"
+            font.pixelSize: 11
         }
 
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
 
-            Label { text: "Direct voltage"; Layout.preferredWidth: 110 }
+            Label { text: "Direct voltage"; Layout.preferredWidth: root.rowLabelWidth }
             Slider {
                 id: voltSlider
                 objectName: "voltSlider"
@@ -295,7 +327,7 @@ Item {
             }
             TextField {
                 id: voltField
-                Layout.preferredWidth: 80
+                Layout.preferredWidth: root.rowFieldWidth
                 text: voltSlider.value.toFixed(3)
                 selectByMouse: true
                 onAccepted: {
@@ -305,7 +337,11 @@ Item {
                     voltSlider.send()
                 }
             }
-            Label { text: "V"; color: "#888" }
+            Label {
+                text: "V"
+                Layout.preferredWidth: root.rowUnitWidth
+                color: "#888"
+            }
         }
 
         RowLayout {
@@ -378,11 +414,15 @@ Item {
 
         // ---- Parameter sliders ---------------------------------------------
         ScrollView {
+            id: paramScroll
             Layout.fillWidth: true
             Layout.fillHeight: true
 
             ColumnLayout {
-                width: root.width - 24
+                // The scrollbar takes its width out of the view when it appears;
+                // binding to the view's own available width keeps the parameter
+                // sliders on the same grid as the drive rows either way.
+                width: paramScroll.availableWidth
                 spacing: 4
 
                 Repeater {
@@ -392,7 +432,7 @@ Item {
                         spacing: 8
                         Label {
                             text: modelData.label
-                            Layout.preferredWidth: 170
+                            Layout.preferredWidth: root.rowLabelWidth
                             color: "#333"
                         }
                         Slider {
@@ -420,7 +460,7 @@ Item {
                             onPressedChanged: if (!pressed) send()
                         }
                         TextField {
-                            Layout.preferredWidth: 90
+                            Layout.preferredWidth: root.rowFieldWidth
                             text: paramSlider.value.toFixed(root.decimalsOf(modelData.step))
                             selectByMouse: true
                             horizontalAlignment: TextInput.AlignHCenter
@@ -433,6 +473,8 @@ Item {
                         }
                         Label {
                             text: modelData.unit
+                            Layout.preferredWidth: root.rowUnitWidth
+                            elide: Text.ElideRight
                             color: "#555"
                             font.pixelSize: 11
                         }

@@ -2,15 +2,17 @@
 --  debug/tune.lua — bench tuning GUI for one wheel module over its serial
 --  channel (USART2 / the ST-LINK VCP).
 --
---      radapter --gui debug/tune.lua [port=/dev/ttyACM0] [max=1] [vmax=6]
---                                      [log=<file>]
+--      radapter --gui debug/tune.lua [port=/dev/ttyACM0] [vmax=6] [log=<file>]
 --
 --  Sliders for every runtime-config parameter (mods/config_defs.lua ids, the
 --  same ids the CAN config topic uses), live charts of the `V1` diagnostics
 --  line (speed target vs actual, q/phase currents, q voltage and the bus), a
---  target-speed and an open-loop-voltage slider with a Reset that zeroes both
---  without touching the parameters, and the enable / zero / calibrate
---  commands. The module's EEPROM keeps every accepted value, so a tuning
+--  NORMALIZED target-speed slider (-1..1 of the module's full-scale wheel
+--  speed, config id 16) and an open-loop-voltage slider, with a Reset that
+--  zeroes both without touching the parameters, and the enable / zero /
+--  calibrate commands. The m/s the slider will command is shown next to it,
+--  from the module's own read-back of that full-scale value. The module's
+--  EEPROM keeps every accepted value, so a tuning
 --  survives GUI restarts and power cycles: on connect the GUI reads each id
 --  back (`G<id>`) and the sliders start from what the module runs now.
 --
@@ -19,18 +21,18 @@
 -- =============================================================================
 
 local USAGE = [[
-usage: radapter --gui debug/tune.lua [port=/dev/ttyACM0] [max=1] [vmax=6]
-                                [log=<file>]
+usage: radapter --gui debug/tune.lua [port=/dev/ttyACM0] [vmax=6] [log=<file>]
 
   port    module's serial bench channel (USART2)
-  max     target-speed slider range, m/s
   vmax    direct-voltage slider range, V
   log     append every line the module sends to this file (timestamped)
+
+The target-speed slider is normalized: -1..1 of the module's full-scale wheel
+speed (config id 16), which the GUI reads back on connect and shows in m/s.
 ]]
 
 local opts = {
     port = "/dev/ttyACM0",
-    max = 1.0,
     vmax = 6.0,
     log = nil,
 }
@@ -70,7 +72,6 @@ for _, arg in ipairs(args) do
     end
 end
 
-if opts.max <= 0 then error("max must be positive") end
 if opts.vmax <= 0 then error("vmax must be positive") end
 
 package.path = SCRIPT_DIR .. "/../?.lua;" .. package.path
@@ -110,6 +111,8 @@ table.sort(params, function(a, b) return a.id < b.id end)
 local values = {}
 -- Wheel diameter from id 0 (m/s <-> rad/s for the speed chart).
 local wheel_diameter_m = config_defs.wheel_diameter.default
+-- Full-scale wheel speed from id 16: the m/s a normalized target of 1.0 means.
+local max_speed_m_s = config_defs.max_speed.default
 -- Latest diagnostics sample, throttled into the view.
 local latest_diag
 local last_push_s = 0.0
@@ -170,6 +173,9 @@ local function apply_read_back()
             changed = true
             if p.id == config_defs.wheel_diameter.id then
                 wheel_diameter_m = value
+            elseif p.id == config_defs.max_speed.id then
+                max_speed_m_s = value
+                view { max_speed_mps = value }
             end
         end
     end
@@ -222,7 +228,9 @@ pipe(view, function(msg)
     if msg.set then
         command(("C%d:%s"):format(msg.set.id, msg.set.value))
     elseif msg.target ~= nil then
-        command(("T%.3f"):format(msg.target))
+        -- Already normalized -1..1: the module maps it onto its full scale.
+        local target = math.max(-1.0, math.min(1.0, msg.target))
+        command(("T%.3f"):format(target))
     elseif msg.voltage ~= nil then
         command(("Q%.3f"):format(msg.voltage))
     elseif msg.enable == true then
@@ -246,7 +254,7 @@ end)
 
 view {
     params = params,
-    max_speed = opts.max,
+    max_speed_mps = max_speed_m_s,
     max_voltage = opts.vmax,
     status = "(connecting)",
 }
