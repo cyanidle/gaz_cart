@@ -1,29 +1,46 @@
-import QtQuick 2.3
-import QtQuick.Controls 2.3
-import QtQuick.Layouts 1.3
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
 import QtCharts 2.3
 
+// One bench tuner view for both transports (mods/tuner.lua decides which):
+//   serial  a module over USART2 — per-phase diagnostics, read-back, enable
+//   can     the cart's service channel — per-wheel target/actual speed only
+//
+// The parameter rows carry hover help (qml/ParamHelp.qml): hovering a row shows
+// what that knob does and a small sketch of the effect at its current value.
 Item {
     id: root
 
     property var model
-    // The module's configured full-scale wheel speed (config id 16, read back on
-    // connect and refreshed on every C16 write): a normalized target of 1.0
-    // commands this many m/s.
+    // Full scale a normalized 1.0 means (config id 16, read back on serial).
     property real maxSpeedMps: model.max_speed_mps ? model.max_speed_mps : 0.5
-    property real maxVoltage: model.max_voltage ? model.max_voltage : 6.0
-    property real minVoltage: model.min_voltage ? model.min_voltage : -6.0
+    property real maxVoltage: model.max_voltage ? model.max_voltage : 10.0
+    property real minVoltage: model.min_voltage ? model.min_voltage : -10.0
+    property bool diagnostics: model.diagnostics === true
+    property bool canEnable: model.can_enable === true
+    property bool canReadBack: model.readback === true
+    property string transport: model.transport ? model.transport : "serial"
+    property string wheel: model.wheel ? model.wheel : ""
+
     property double chartTime: 0
     property double lastSample: 0
 
-    // Shared row metric. Every row is label | slider | value field | unit with
-    // these three columns fixed, so the slider takes the same remainder in
-    // every row and all sliders and fields line up down the panel. A column
-    // left to its text width (the units did) makes each row distribute on its
-    // own and the rows drift apart.
+    // Shared row metric: label | slider | value field | unit.
     property int rowLabelWidth: 170
     property int rowFieldWidth: 90
     property int rowUnitWidth: 80
+
+    // Wheels the CAN transport can drive (empty on the serial channel, which
+    // is attached to exactly one module). Lua pushes a list, which arrives as
+    // an array-like object, so copy it into a real JS array here.
+    property var wheelList: {
+        var source = model.wheels
+        var out = []
+        if (!source || typeof source.length !== "number") return out
+        for (var i = 0; i < source.length; i++) out.push(source[i])
+        return out
+    }
 
     Component.onCompleted: {
         model.ensure("params")
@@ -32,6 +49,7 @@ Item {
         model.ensure("max_speed_mps")
         model.ensure("max_voltage")
         model.ensure("min_voltage")
+        model.ensure("wheels")
     }
 
     function decimalsOf(step) {
@@ -50,42 +68,37 @@ Item {
         }
     }
 
-    // Feed the latest diagnostics sample into the chart series at ~25 Hz.
-    // Maintain a 20 s rolling window: append, drop points older than the
-    // window, scroll X on every chart, rescale Y to the points still visible.
+    // Feed the latest sample into the chart series at ~25 Hz over a 20 s window.
     Timer {
         interval: 40; running: true; repeat: true
         onTriggered: {
             var d = model.diag
-            if (!d || d.t === undefined) return
-            lastSample = d.n
+            if (!d || (d.tgt_m_s === undefined && d.act_m_s === undefined)) return
+            lastSample = d.t_ms !== undefined ? d.t_ms : lastSample + 1
             chartTime += 0.04
-            tgtSeries.append(chartTime, d.t)
-            actSeries.append(chartTime, d.vm)
-            spSeries.append(chartTime, d.sp)
-            iqSeries.append(chartTime, d.iq)
-            imSeries.append(chartTime, d.im)
-            uqSeries.append(chartTime, d.uq)
-            udSeries.append(chartTime, d.ud)
-            busSeries.append(chartTime, d.b)
+            tgtSeries.append(chartTime, d.tgt_m_s || 0)
+            actSeries.append(chartTime, d.act_m_s || 0)
+            if (root.diagnostics) {
+                iqSeries.append(chartTime, d.iq || 0)
+                uqSeries.append(chartTime, d.uq || 0)
+                busSeries.append(chartTime, d.bus || 0)
+            }
             var cutoff = chartTime - 20.0
             while (tgtSeries.count > 0 && tgtSeries.at(0).x < cutoff) {
                 tgtSeries.remove(0); actSeries.remove(0)
-                spSeries.remove(0); iqSeries.remove(0); imSeries.remove(0)
-                uqSeries.remove(0); udSeries.remove(0); busSeries.remove(0)
+                if (root.diagnostics) { iqSeries.remove(0); uqSeries.remove(0); busSeries.remove(0) }
             }
             scroll(speedX)
-            scroll(currX)
-            scroll(voltX)
             rescale(speedY, [tgtSeries, actSeries])
-            rescale(currY, [spSeries, iqSeries, imSeries])
-            rescale(voltY, [uqSeries, udSeries, busSeries])
+            if (root.diagnostics) {
+                scroll(auxX)
+                rescale(auxY, [iqSeries, uqSeries])
+            }
         }
     }
 
-    // Every chart shares the same rolling window; an axis that is not scrolled
-    // leaves its series drawing past `max` and the chart goes blank once the
-    // window has advanced past the initial range.
+    // An axis that is not scrolled leaves its series drawing past `max` and the
+    // chart goes blank once the window has advanced past the initial range.
     function scroll(axis) {
         axis.min = Math.max(0, chartTime - 20.0)
         axis.max = Math.max(20.0, chartTime)
@@ -111,12 +124,47 @@ Item {
         anchors.margins: 12
         spacing: 8
 
-        // ---- Charts -------------------------------------------------------
+        // ---- Where the values come from ------------------------------------
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+            Label {
+                text: "Wheel"
+                visible: wheelBox.visible
+            }
+            ComboBox {
+                id: wheelBox
+                objectName: "tuneWheelBox"
+                visible: root.wheelList.length > 0
+                Layout.preferredWidth: 90
+                model: root.wheelList
+                currentIndex: Math.max(0, root.wheelList.indexOf(root.wheel))
+                onActivated: root.model.send({ wheel: currentText })
+            }
+            Label {
+                objectName: "sourceLabel"
+                text: root.transport === "serial"
+                    ? "Module over serial — values read from the module"
+                    : "Cart over CAN (service channel) — wheel " + root.wheel
+                        + ", values are what was sent"
+                font.bold: true
+                color: "#333"
+            }
+            Item { Layout.fillWidth: true }
+            Label {
+                objectName: "fullScaleLabel"
+                text: root.maxSpeedMps.toFixed(3) + " m/s at 1.0 (config id 16)"
+                color: "#888"
+                font.pixelSize: 11
+            }
+        }
+
+        // ---- Charts --------------------------------------------------------
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.preferredHeight: 260
-            Layout.minimumHeight: 200
+            Layout.preferredHeight: 240
+            Layout.minimumHeight: 170
             spacing: 8
 
             ChartView {
@@ -151,6 +199,7 @@ Item {
                 }
                 LineSeries {
                     id: tgtSeries
+                    objectName: "tgtSeries"
                     name: "target"
                     color: "#e74c3c"
                     width: 2
@@ -160,93 +209,51 @@ Item {
             }
 
             ChartView {
-                id: currentChart
+                id: auxChart
+                objectName: "auxChart"
+                visible: root.diagnostics
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 antialiasing: true
                 theme: ChartView.ChartThemeLight
                 legend.alignment: Qt.AlignTop
-                title: "Currents"
+                title: "q current (A) and q voltage (V)"
 
                 ValueAxis {
-                    id: currX
+                    id: auxX
                     min: 0; max: 20
                     titleText: "time (s)"
                     labelFormat: "%.0f"
                 }
                 ValueAxis {
-                    id: currY
-                    min: -1; max: 6
-                    titleText: "current (A)"
+                    id: auxY
+                    min: -1; max: 8
                     labelFormat: "%.1f"
                 }
                 LineSeries {
-                    id: spSeries
-                    name: "q set-point"
-                    color: "#f39c12"
-                    width: 1
-                    style: Qt.DashLine
-                    axisX: currX; axisY: currY
-                }
-                LineSeries {
                     id: iqSeries
-                    name: "q measured"
+                    objectName: "iqSeries"
+                    name: "iq (A)"
                     color: "#2980b9"
                     width: 2
-                    axisX: currX; axisY: currY
+                    axisX: auxX; axisY: auxY
                 }
                 LineSeries {
-                    id: imSeries
-                    name: "phase magnitude"
-                    color: "#7f8c8d"
+                    id: uqSeries
+                    objectName: "uqSeries"
+                    name: "uq (V)"
+                    color: "#8e44ad"
                     width: 1
-                    axisX: currX; axisY: currY
+                    axisX: auxX; axisY: auxY
                 }
-            }
-        }
-
-        ChartView {
-            id: voltChart
-            Layout.fillWidth: true
-            Layout.preferredHeight: 180
-            Layout.minimumHeight: 120
-            antialiasing: true
-            theme: ChartView.ChartThemeLight
-            legend.alignment: Qt.AlignTop
-            title: "Voltages"
-
-            ValueAxis {
-                id: voltX
-                min: 0; max: 20
-                titleText: "time (s)"
-                labelFormat: "%.0f"
-            }
-            ValueAxis {
-                id: voltY
-                min: 0; max: 20
-                titleText: "voltage (V)"
-                labelFormat: "%.1f"
-            }
-            LineSeries {
-                id: uqSeries
-                name: "uq"
-                color: "#8e44ad"
-                width: 2
-                axisX: voltX; axisY: voltY
-            }
-            LineSeries {
-                id: udSeries
-                name: "ud"
-                color: "#16a085"
-                width: 1
-                axisX: voltX; axisY: voltY
-            }
-            LineSeries {
-                id: busSeries
-                name: "bus"
-                color: "#2c3e50"
-                width: 1
-                axisX: voltX; axisY: voltY
+                LineSeries {
+                    id: busSeries
+                    objectName: "busSeries"
+                    name: "bus (V)"
+                    color: "#2c3e50"
+                    width: 1
+                    axisX: auxX; axisY: auxY
+                }
             }
         }
 
@@ -260,9 +267,7 @@ Item {
                 id: tgtSlider
                 objectName: "tgtSlider"
                 Layout.fillWidth: true
-                // Normalized: -1..1 of the module's full-scale wheel speed. The
-                // m/s equivalent is shown next to it; the module owns the
-                // mapping, so the same slider drives a module at any top speed.
+                // Normalized: -1..1 of the module's full-scale wheel speed.
                 from: -1; to: 1
                 stepSize: 0.01
                 value: 0
@@ -281,12 +286,11 @@ Item {
             }
             TextField {
                 id: tgtField
+                objectName: "tuneTgtField"
                 Layout.preferredWidth: root.rowFieldWidth
-                // Bound to the slider so a drag is visible here as well as on
-                // the handle; typing a value and pressing Enter moves the
-                // slider, which re-fires the binding.
                 text: tgtSlider.value.toFixed(3)
                 selectByMouse: true
+                horizontalAlignment: TextInput.AlignHCenter
                 onAccepted: {
                     var v = parseFloat(text)
                     if (isNaN(v)) return
@@ -301,17 +305,6 @@ Item {
                 elide: Text.ElideRight
                 color: "#888"
             }
-        }
-
-        // The full scale once, instead of repeating it in the row above: this is
-        // what a normalized 1.0 commands on the connected module.
-        Label {
-            objectName: "fullScaleLabel"
-            Layout.fillWidth: true
-            text: "Target speed is normalized (-1..1 of the module's full scale): 1.0 = "
-                + root.maxSpeedMps.toFixed(3) + " m/s (config id 16, G16)"
-            color: "#888"
-            font.pixelSize: 11
         }
 
         RowLayout {
@@ -340,9 +333,11 @@ Item {
             }
             TextField {
                 id: voltField
+                objectName: "voltField"
                 Layout.preferredWidth: root.rowFieldWidth
                 text: voltSlider.value.toFixed(3)
                 selectByMouse: true
+                horizontalAlignment: TextInput.AlignHCenter
                 onAccepted: {
                     var v = parseFloat(text)
                     if (isNaN(v)) return
@@ -357,12 +352,8 @@ Item {
             }
         }
 
-        // ---- Voltage slider range ------------------------------------------
-        // The module's open-loop channel takes any voltage; what it can apply is
-        // bounded by the modulation ceiling (half the bus times the bootstrap
-        // headroom), so the useful range moves with the rail. Editable here
-        // instead of only on the command line (`vmax=`); the range is session
-        // state — `tune.lua` seeds it and keeps no copy.
+        // Voltage slider range: the module's ceiling moves with the rail, so the
+        // useful range is editable here instead of only on the command line.
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
@@ -372,9 +363,6 @@ Item {
                 Layout.preferredWidth: root.rowLabelWidth
                 color: "#555"
             }
-            // Keeps the two fields and the range label in the same columns as
-            // every other row (label | slider | field | unit): without a filler
-            // here they pack left against the label and break the alignment.
             Item { Layout.fillWidth: true }
             TextField {
                 id: voltMinField
@@ -416,44 +404,43 @@ Item {
 
             Button {
                 objectName: "enableBtn"
+                visible: root.canEnable
                 text: "Enable"
                 onClicked: root.model.send({ enable: true })
             }
             Button {
+                objectName: "disableBtn"
+                visible: root.canEnable
                 text: "Disable"
                 onClicked: root.model.send({ enable: false })
             }
             Button {
+                objectName: "resetBtn"
                 text: "Reset"
-                // Zeroes the drive sliders and both module set-points; the
-                // tuning parameters above are kept as they are.
+                // Zeroes the drive sliders and both set-points; parameters stay.
                 onClicked: {
                     tgtSlider.value = 0
                     voltSlider.value = 0
-                    // The TextFields are bound to the sliders: setting the
-                    // values above updates them, and an imperative text write
-                    // here would break that binding for good.
                     root.model.send({ zero: true })
                     statusLabel.text = "Set-points zeroed (parameters kept)"
                 }
             }
             Button {
+                objectName: "calibrateBtn"
+                visible: root.diagnostics
                 text: "Calibrate R/L"
-                onClicked: {
-                    root.model.send({ calibrate: true })
-                    statusLabel.text = "Calibration running (wheel must be free, takes seconds)"
-                }
+                onClicked: root.model.send({ line: "A" })
             }
             Button {
+                objectName: "readbackBtn"
+                visible: root.canReadBack
                 text: "Read from module"
                 onClicked: root.model.send({ readback: true })
             }
             Button {
                 objectName: "traceArmBtn"
+                visible: root.diagnostics
                 text: "Trace arm"
-                // Arms the module's loop-trace dump: the next Hall anomaly,
-                // angle snap, guard trip or driver fault dumps the ~51 ms of
-                // loop history before it into the log/terminal.
                 onClicked: {
                     root.model.send({ line: "W1" })
                     statusLabel.text = "Trace armed: the next anomaly dumps ~51 ms of loop history"
@@ -461,45 +448,57 @@ Item {
             }
             Button {
                 objectName: "traceDumpBtn"
+                visible: root.diagnostics
                 text: "Trace dump"
-                onClicked: {
-                    root.model.send({ line: "W" })
-                    statusLabel.text = "Trace dump requested (lands in the log)"
-                }
+                onClicked: root.model.send({ line: "W" })
             }
             Button {
-                objectName: "traceCountsBtn"
+                objectName: "countersBtn"
+                visible: root.diagnostics
                 text: "Counters"
-                onClicked: {
-                    root.model.send({ line: "K" })
-                    statusLabel.text = "Event counters requested (hall_bad/rate_bad/angle_snap/...)"
-                }
+                onClicked: root.model.send({ line: "K" })
             }
             Item { Layout.fillWidth: true }
         }
 
-        // ---- Parameter sliders ---------------------------------------------
+        // ---- Parameter sliders with hover help -----------------------------
         ScrollView {
             id: paramScroll
             Layout.fillWidth: true
             Layout.fillHeight: true
 
             ColumnLayout {
-                // The scrollbar takes its width out of the view when it appears;
-                // binding to the view's own available width keeps the parameter
-                // sliders on the same grid as the drive rows either way.
                 width: paramScroll.availableWidth
                 spacing: 4
 
                 Repeater {
                     model: root.model.params
                     delegate: RowLayout {
+                        id: paramRow
+                        objectName: "paramrow_" + modelData.key
                         Layout.fillWidth: true
                         spacing: 8
+
+                        // Hover anywhere on the row (label, slider, field) to see
+                        // what the parameter does and how the value shapes it.
+                        HoverHandler {
+                            id: paramHover
+                            onHoveredChanged: {
+                                if (hovered) {
+                                    help.param = modelData
+                                    help.open()
+                                } else {
+                                    help.close()
+                                }
+                            }
+                        }
+
                         Label {
+                            objectName: "paramlabel_" + modelData.key
                             text: modelData.label
                             Layout.preferredWidth: root.rowLabelWidth
-                            color: "#333"
+                            color: paramHover.hovered ? "#2c7fb8" : "#333"
+                            font.underline: paramHover.hovered
                         }
                         Slider {
                             id: paramSlider
@@ -526,6 +525,7 @@ Item {
                             onPressedChanged: if (!pressed) send()
                         }
                         TextField {
+                            objectName: "paramfield_" + modelData.key
                             Layout.preferredWidth: root.rowFieldWidth
                             text: paramSlider.value.toFixed(root.decimalsOf(modelData.step))
                             selectByMouse: true
@@ -544,6 +544,20 @@ Item {
                             color: "#555"
                             font.pixelSize: 11
                         }
+
+                        ParamHelp {
+                            id: help
+                            parent: paramRow
+                            x: 0
+                            // Below the row, or above it when the window has no
+                            // room left below — a row near the bottom would
+                            // otherwise be cut off by the window edge.
+                            y: {
+                                var top = paramRow.mapToItem(null, 0, 0).y
+                                var fitsBelow = top + paramRow.height + 2 + help.implicitHeight <= root.height
+                                return fitsBelow ? paramRow.height + 2 : -help.implicitHeight - 2
+                            }
+                        }
                     }
                 }
             }
@@ -559,11 +573,11 @@ Item {
         }
         Label {
             id: statusLabel
-            objectName: "statusLabel"
+            objectName: "tuneStatusLabel"
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: "#444"
-            text: "Drag a slider (or type a value and press Enter) to apply."
+            text: "Drag a slider (or type a value and press Enter) to apply. Hover a parameter to see what it does."
         }
     }
 }

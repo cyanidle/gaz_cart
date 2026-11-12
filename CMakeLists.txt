@@ -84,4 +84,12 @@ if(NOT CMAKE_CROSSCOMPILING AND TARGET radapter)
             COMMAND $<TARGET_FILE:radapter> ${CMAKE_CURRENT_SOURCE_DIR}/tests/${script}.lua)
         set_tests_properties(${script} PROPERTIES TIMEOUT 30)
     endforeach()
+    # The tuner window over its CAN transport, against a fake service channel in
+    # the same process: runs offscreen, so it needs no hardware and no display.
+    if(RADAPTER_GUI)
+        add_test(NAME gui_tuner
+            COMMAND ${CMAKE_COMMAND} -E env QT_QPA_PLATFORM=offscreen
+                $<TARGET_FILE:radapter> --gui ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_tuner.lua)
+        set_tests_properties(gui_tuner PROPERTIES TIMEOUT 120)
+    endif()
 endif()
