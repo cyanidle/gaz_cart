@@ -1,4 +1,6 @@
 # Direct-voltage hold — the periodic stutter.
+# Q10 is fully reachable only with at least ~22.3 V on the rail; lower rails
+# clamp the applied q-voltage to their live modulation ceiling.
 #
 # Holds an open-loop voltage (Q, no speed loop at all) and reports the counters
 # and the per-phase loop timing before and after. The reported stutter is very
@@ -24,12 +26,12 @@
 @ 1.0
 
 # The hold the stutter was reported at. Long enough for several of them.
-> Q6
+> Q10
 ? 40.0
 > K
 @ 0.5
 
-> Q-6
+> Q-10
 ? 20.0
 > K
 @ 0.5

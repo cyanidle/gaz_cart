@@ -2,7 +2,7 @@
 --  debug/tune.lua — bench tuning GUI for one wheel module over its serial
 --  channel (USART2 / the ST-LINK VCP).
 --
---      radapter --gui debug/tune.lua [port=/dev/ttyACM0] [vmax=6] [log=<file>]
+--      radapter --gui debug/tune.lua [port=/dev/ttyACM0] [vmax=10] [log=<file>]
 --
 --  Sliders for every runtime-config parameter (mods/config_defs.lua ids, the
 --  same ids the CAN config topic uses), live charts of the `V1` diagnostics
@@ -21,7 +21,7 @@
 -- =============================================================================
 
 local USAGE = [[
-usage: radapter --gui debug/tune.lua [port=/dev/ttyACM0] [vmax=6] [log=<file>]
+usage: radapter --gui debug/tune.lua [port=/dev/ttyACM0] [vmax=10] [log=<file>]
 
   port    module's serial bench channel (USART2)
   vmax    direct-voltage slider range, V
@@ -33,7 +33,7 @@ speed (config id 16), which the GUI reads back on connect and shows in m/s.
 
 local opts = {
     port = "/dev/ttyACM0",
-    vmax = 6.0,
+    vmax = 10.0,
     log = nil,
 }
 
