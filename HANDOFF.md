@@ -29,6 +29,19 @@ operation or speeds above its live electrical ceiling.
   at every build without changing its timestamp when the commit is unchanged.
 - **Disable safety:** automatic gate-driver fault recovery can no longer
   re-enable a motor after an explicit `E0`.
+- **EEPROM wear and the 14 ms stall:** the wheel-config record is written only
+  when the drive is idle, once per debounce window, and only if a value really
+  differs from what the record holds. Measured on the bench: a `C` write under
+  a running drive used to stall the loop 13.9 ms (entirely `K5 persist`, 2.8
+  speed-loop periods with the bridge on a stale vector); now it logs
+  `eeprom: save deferred until the drive is idle` and writes at the next stop.
+- **Live bench config (EEPROM v5 on the test module):** `C16 = 0.345 m/s`
+  (the ceiling is 0.3507-0.3510 and tracks the bus; anything at or above it
+  clamps every full-scale command and resets the regulator), `C12 = 0.030 s`
+  velocity LPF (halves the full-scale jitter against 0.015 s without the
+  voltage-limit episodes 0.05 s and 0.08 s produce), Kp 3.42 / Ki 2.69, ramp
+  0.9 m/s², brake 3.1 A, wheel 0.32 m. Achieved 2.15 wheel rad/s (0.344 m/s,
+  1376 rotor rpm) both directions with `K1 bad=0`, no derate, no fault.
 
 ## Bench evidence
 
@@ -69,14 +82,23 @@ Measured state is green: `ctest --test-dir firmware/tests/build` 7/7, Debug and
 Release both build, the cart-side Lua self-tests pass, and `mods/config_defs.lua`
 ids still match `App/config_ids.h` (C0..C16).
 
-1. **Max speed — blocked by the supply, nothing left in software.** The compiled
-   caps are 60 V / 30 V now; what binds is the 18.5 V rail, which regulates about
-   0.3515 m/s (~2.2 wheel rad/s) and clamps `Q10` to ~8.3 V applied. To close
-   this, connect a supply of at least 22.3 V that can hold the load and sink
-   braking energy, then run `debug/bench_maxspeed_hold.txt` and
-   `debug/bench_voltage_hold.txt` (`Q10`/`Q-10`) and compare `K` before/after:
-   expect `K1 bad=0`, `K2 derate_hi=derate_lo=0 driver=0`, `K4 slow=0`. Arm
-   `W1` before the run so an event captures itself.
+1. **Max speed — the rail is the limit, and the missing 15 % is the modulation
+   scheme.** Measured 2026-11-12 (Release, wheel free, `Q` sweep):
+   `uq 2.0/4.0/6.0/8.0/8.30 V` give `0.663/1.383/2.085/2.748/2.845` wheel rad/s
+   — i.e. **0.455 m/s, 27 wheel rpm, 1738 rotor rpm** at the rail's full applied
+   voltage, dead steady (3.5 % spread over 128 samples). The chain is
+   `18.5 V → SinePWM phase limit Vdc/2 = 9.25 V → ×0.9 bootstrap headroom =
+   8.325 V → / 0.0456 V per rotor rad/s = 182 rad/s`. Effective EMF is
+   0.0456-0.0472 V per rotor rad/s (KV ≈ 210-220 rpm/V against a 230 nameplate),
+   so `ppairs=4`, `gear_ratio=64` and `torque_const=0.0478` all agree with the
+   measurement — there is no stray factor.
+   **A 2 k rpm target needs ~9.6 V applied.** The one software lever is
+   space-vector modulation: `Vdc/√3 × 0.9 = 10.68 × 0.9 = 9.6 V` — exactly
+   ~2000 rpm on this same rail (+15 % everywhere). That is a change in the
+   vendored Arduino-FOC PWM path (`foc_modulation = SinePWM`, see
+   `App/backends/motor_backend_simplefoc.cpp`) and needs the bootstrap-refresh
+   check that produced the 0.9 headroom in the first place. Otherwise a supply of
+   at least 21 V is needed. Left for a later session on purpose.
 2. **Cyphal phase ~2.9 ms in Debug — bounded now, cause is codegen.** A pass can
    no longer drain 8 RX frames and the whole TX queue (`can_loop` serves one
    frame and one queue item), and `K5` now splits the phase into `can=`,
@@ -85,20 +107,24 @@ ids still match `App/config_ids.h` (C0..C16).
    reassembly/CRC, not a logic defect. Verification: run the hold in Debug, read
    `K5`; if `can=` still reaches ~2 ms with one frame per pass, bench in Release
    and treat Debug as a diagnostics-only build.
-3. **Rare sudden stop — no reproducer, tooling is in place.** The mechanism is
-   named by the counter that moves: run `K` before, reproduce, run `K` after and
-   diff `K1`..`K5`; `W1` auto-dumps the 51 ms ring on the next hall_bad /
-   rate_bad / guard trip / derate entry / driver fault / target clamp, and `W`
-   dumps it on demand. The only trace of this so far is one implausible Hall-rate
-   sample in the tail of the final coast, with no guard, derate, fault or
-   overrun behind it — that Hall rate is the first thing to look at, and the
-   `I` line now says exactly which image produced the log.
+3. **Rare sudden stop — one candidate removed, no reproducer yet.** The 13.9 ms
+   EEPROM stall on every config write (fixed above: writes now wait for an idle
+   drive) was a plausible in-motion stall and is gone. What remains is named by
+   the counter that moves: run `K` before, reproduce, run `K` after and diff
+   `K1`..`K5`; `W1` auto-dumps the 51 ms ring on the next hall_bad / rate_bad /
+   guard trip / derate entry / driver fault / target clamp, and `W` dumps it on
+   demand. Note that the dump itself costs ~65 ms in `K5 poll` (the ~12 kB takes
+   the serial link over), so arm `W1` only when you want the capture. The only
+   trace so far is one implausible Hall-rate sample in the tail of the final
+   coast, with no guard, derate, fault or overrun behind it — that Hall rate is
+   the first thing to look at, and the `I` line says exactly which image
+   produced the log.
 
 ## Verification / reproduction
 
 ```sh
 cmake --build firmware/tests/build
-ctest --test-dir firmware/tests/build --output-on-failure   # 7/7
+ctest --test-dir firmware/tests/build --output-on-failure   # 8/8
 ninja -C firmware/build                                     # Debug
 ninja -C firmware/build-release                             # Release
 
