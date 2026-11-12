@@ -46,10 +46,25 @@ tree dirty — every coherent step lands in a commit before you move on:
   drives one wheel through `cart.lua`'s service channel, `transport="serial"` uses
   a module's USART2 bench channel directly (read-back, per-phase diagnostics,
   enable). `mods/tuner_help.lua` — per-parameter hover text plus the sketch kind
-  (`qml/ParamHelp.qml` draws it), checked against `config_defs` by
+  (`qml/ParamHelp.qml` draws it; hovering a parameter's **name** opens it, not the
+  slider or the value field), checked against `config_defs` by
   `tests/tuner_help.lua`. `qml/Tuner.qml` + `qml/TunerWindow.qml` — the one shared
   window. `gui.lua` opens it (CAN by default, `serial=<port>` for a bench module)
-  and `debug/tune.lua` is a thin serial launcher over the same files.
+  and `debug/tune.lua` is a thin serial launcher over the same files (`lang=ru|en`
+  as well).
+- Localization — one tumbler (`qml/LangSwitch.qml`) switches the whole GUI
+  between **Russian (default, not persisted)** and English, in every open window
+  at once. Chrome text lives in the QML singleton `qml/Tr/Tr.qml`
+  (`Tr.t/tf/sourceName`) — a singleton rather than a per-window property because
+  radapter gives each window its own `QQmlEngine` but shares singletons. Model
+  text (parameter names and units, hover help, status lines, fault names)
+  travels through the GuiModel, so it is picked in Lua: `mods/i18n.lua` for the
+  status lines, `label_ru`/`unit_ru` beside every `mods/config_defs.lua` id,
+  `what = {en=…, ru=…}` in `mods/tuner_help.lua`, and `Tuner:set_lang` rebuilds
+  and re-pushes the parameter list. The tumbler sends `{lang=…}` to its view's
+  model; `gui.lua` routes it and **never forwards it to the cart**. A new
+  user-visible string must be added in both languages or `tests/i18n.lua` (QML
+  keys + call sites) / `tests/tuner_help.lua` fail.
 - `gui.lua` — config GUI; connects to `cart.lua`'s websocket from another host.
 - `joystick/` — native `gaz_joystick` plugin: a HID **source** worker for the
   Universal RC Joystick (`/dev/hidraw*`) that emits `{axes, buttons, raw}`.
@@ -193,8 +208,9 @@ Cart deployment on the RPi composes three pieces:
 
 Installed layout (`gaz-cart-gui`): `/usr/bin/radapter` (GUI build),
 `/usr/bin/gaz-gui` launcher, the shared SDK, `/usr/share/gaz-gui/gui.lua`,
-`qml/*.qml`, and the Lua modules `gui.lua` loads at runtime
-(`mods/config_defs.lua`, `mods/tuner.lua`, `mods/tuner_help.lua`). Sent-config
+`qml/*.qml` (plus the `qml/Tr/` singleton), and the Lua modules `gui.lua` loads
+at runtime (`mods/config_defs.lua`, `mods/i18n.lua`, `mods/tuner.lua`,
+`mods/tuner_help.lua`). Sent-config
 state is persisted under `$XDG_DATA_HOME/gaz-gui/config.json` (the
 `GAZ_GUI_STATE` override), never under `/usr/share`.
 
