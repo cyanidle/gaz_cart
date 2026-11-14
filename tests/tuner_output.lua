@@ -5,8 +5,10 @@
 --
 --     build/bin/radapter tests/tuner_output.lua
 --
--- No transport and no window: the ring and the push throttle are plain Lua on a
--- tuner object, so this runs on the host with nothing attached.
+-- No transport and no real window (a table stands in for the diagnostics view,
+-- which the tuner creates lazily): the ring, the push throttle and the state
+-- replay are plain Lua on a tuner object, so this runs on the host with nothing
+-- attached.
 
 package.path = SCRIPT_DIR .. "/../?.lua;" .. package.path
 
@@ -44,6 +46,56 @@ sleep(300)
 assert(#pushes > before, "a line after the quiet period was never pushed")
 assert(pushes[#pushes]:find("# line 501", 1, true), "the new line is missing from the push")
 assert(#tuner.output == 400, "the ring grew past its limit")
+
+-- ---- the window is created by the first press, not before --------------------
+-- A table stands in for the diagnostics window: it records what the tuner pushes
+-- into it, so the lazy window and its state replay are plain Lua to check.
+local windows = {}
+local real_qml, real_pipe = QML, pipe
+QML = function(opts)
+    local props = { url = opts.url }
+    local view = setmetatable({}, {
+        __call = function(_, value)
+            for key, item in pairs(value) do props[key] = item end
+        end,
+        __index = props,
+    })
+    windows[#windows + 1] = view
+    return view
+end
+pipe = function() end
+
+local deferred = setmetatable({
+    output = {}, diag_raise = 0, transport = "serial",
+    diag_url = "probe.qml", diag_status_text = "idle",
+}, Tuner)
+deferred:_output_line("# collected before the window existed")
+sleep(300)
+assert(#windows == 0, "a diagnostics window appeared without a press")
+
+deferred:open_diagnostics()
+assert(#windows == 1, ("the first press made %d windows"):format(#windows))
+local view = windows[1]
+assert(view.url == "probe.qml", "the window was not created from diag_url")
+assert(view.text:find("# collected before the window existed", 1, true),
+    "the window did not get the lines collected before it opened")
+assert(view.counters == true, "the serial transport lost its counters")
+assert(view.raise == 1, ("the first press raised to %s"):format(tostring(view.raise)))
+
+deferred:_diag_status("recording")
+assert(view.status == "recording", "the status line never reached the open window")
+
+deferred:_output_line("# after the window")
+sleep(300)
+assert(view.text:find("# after the window", 1, true), "a live line never reached the window")
+
+-- a second press raises the same window, it does not open another one
+deferred:open_diagnostics()
+assert(#windows == 1, ("the second press made %d windows"):format(#windows))
+assert(view.raise == 2, ("the second press raised to %s"):format(tostring(view.raise)))
+assert(view.status == "recording", "the second press lost the status line")
+
+QML, pipe = real_qml, real_pipe
 
 print(("tuner_output: ok (%d lines kept, %d pushes for 500 lines)"):format(#tuner.output, #pushes))
 os.exit(0)

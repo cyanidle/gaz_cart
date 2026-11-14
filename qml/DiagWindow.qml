@@ -3,7 +3,7 @@ import QtQuick.Controls
 import "Tr"
 
 // The diagnostics window — the module's own output and the recording controls,
-// beside the tuner window the same model feeds (mods/tuner.lua opens both).
+// opened by the tuner's Diagnostics button and fed by the same model.
 // A `K` block is five lines and a loop-trace dump a few hundred, while the
 // tuner's status bar holds one, so the counters and the dump need a window.
 ApplicationWindow {
@@ -16,5 +16,12 @@ ApplicationWindow {
     Diag {
         anchors.fill: parent
         model: radapter.model
+        // a second press of the tuner's Diagnostics button brings this window
+        // back instead of opening another one — `show()` is what returns a
+        // window the operator closed, `requestActivate()` then raises it
+        onBringToFront: {
+            root.show()
+            root.requestActivate()
+        }
     }
 }

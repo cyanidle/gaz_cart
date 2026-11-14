@@ -3,11 +3,12 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "Tr"
 
-// Diagnostics beside the tuner: the module's own output (serial `#` lines — the
-// `K` counters, the loop-trace dump, EEPROM and boot messages) in a scrollback,
-// the counters/trace buttons that produce it, and the record controls. Recording
-// is what the *transport* delivers: the module's lines on a serial bench channel,
-// one JSON object per `{state}` snapshot over the cart's service channel.
+// Diagnostics, in the window the tuner's Diagnostics button opens: the module's
+// own output (serial `#` lines — the `K` counters, the loop-trace dump, EEPROM
+// and boot messages) in a scrollback, the counters/trace buttons that produce
+// it, and the record controls. Recording is what the *transport* delivers: the
+// module's lines on a serial bench channel, one JSON object per `{state}`
+// snapshot over the cart's service channel.
 Item {
     id: root
 
@@ -25,6 +26,12 @@ Item {
     // always in the QML default (same seed as qml/Tuner.qml).
     property string modelLang: (model && model.lang !== undefined) ? model.lang : "ru"
     onModelLangChanged: Tr.lang = modelLang
+
+    // The tuner's button brings an already-open window to the front: Lua bumps
+    // this counter on every press.
+    property int raiseLevel: model.raise !== undefined ? model.raise : 0
+    signal bringToFront()
+    onRaiseLevelChanged: if (raiseLevel > 0) bringToFront()
 
     Component.onCompleted: {
         model.ensure("counters")

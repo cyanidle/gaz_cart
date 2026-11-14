@@ -469,6 +469,11 @@ Item {
                 }
             }
             Button {
+                objectName: "diagBtn"
+                text: Tr.t("window_diag")
+                onClicked: root.model.send({ open: "diag" })
+            }
+            Button {
                 objectName: "calibrateBtn"
                 visible: root.diagnostics
                 text: Tr.t("tune_calibrate")

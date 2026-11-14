@@ -25,16 +25,20 @@
 --    diag            { tgt_m_s, act_m_s, iq, uq, ud, im, bus, t_ms } — latest
 --                    sample; ud/im/t_ms only exist on the `V1` serial line
 --
---  The tuner opens a second window beside itself (qml/DiagWindow.qml →
---  qml/Diag.qml) over the same model; its keys are:
+--  A second window (qml/DiagWindow.qml → qml/Diag.qml) rides on the same model,
+--  opened by the tuner's Diagnostics button — created on the first press, raised
+--  afterwards; its keys are:
 --    counters        true when `K`/`W` exist at all (the serial bench channel;
 --                    the service channel carries a state snapshot only)
 --    text            the module's own output, newest last, MAX_OUTPUT_LINES kept
 --    log_active      a recording is open
 --    log_path        file the next (or the running) recording writes to
 --    status          one line for the window's bottom bar
+--    raise           bumped on every press: the window is shown and raised, so
+--                    one the operator closed comes back
 --  Messages it sends are the tuner's own: { line = "K"|"W"|"W1" } (serial),
---  and { record = "start", path = … } / { record = "stop" } on either transport.
+--  { record = "start", path = … } / { record = "stop" } on either transport, and
+--  the tuner window's { open = "diag" } — the button that opens it.
 -- =============================================================================
 
 local config_defs = require "mods.config_defs"
@@ -132,17 +136,18 @@ function Tuner.new(opts)
     self.on_config_sent = opts.on_config_sent
     self.on_lang = opts.on_lang
 
-    -- The diagnostics window is created first so the tuner is the window the
-    -- operator lands in: the last window shown is the active one. The module's
-    -- own output (`K` counters, the loop-trace dump, EEPROM and boot lines) plus
-    -- the record controls live there — a trace dump is hundreds of lines and the
-    -- tuner's status bar shows one.
-    self.diag_view = QML { url = opts.diag_view or (REPO_DIR .. "/qml/DiagWindow.qml") }
+    -- The diagnostics window is not opened until the operator asks for it: it
+    -- holds the module's own output (`K` counters, the loop-trace dump, EEPROM
+    -- and boot lines) and the record controls, which a tuning session does not
+    -- need on screen the whole time.
     self.view = QML { url = opts.view or (REPO_DIR .. "/qml/TunerWindow.qml") }
 
     self.output = {}
     self.log_file = nil
     self.log_path = opts.log_file
+    self.diag_url = opts.diag_view or (REPO_DIR .. "/qml/DiagWindow.qml")
+    self.diag_status_text = i18n.text("diag_idle")
+    self.diag_raise = 0
 
     self.view {
         transport = self.transport,
@@ -160,36 +165,12 @@ function Tuner.new(opts)
         lang = i18n.lang,
     }
 
-    self.diag_view {
-        transport = self.transport,
-        counters = self.transport == "serial",
-        log_active = false,
-        log_path = self.log_path or default_log_path(),
-        text = "",
-        status = i18n.text("diag_idle"),
-        lang = i18n.lang,
-    }
-
     -- The serial probe can take 20 s: a language throw must not fall on the
     -- floor meanwhile, while anything that would touch the transport has to
     -- wait until it exists. Both windows speak to the same model, so the
     -- routing is shared.
     self.opening = true
-    local function dispatch(msg)
-        if self.opening then
-            -- a language throw must not fall on the floor, and a recording is
-            -- not tied to the transport: the file can be started while the
-            -- serial probe is still running
-            if msg.lang ~= nil then self:set_lang(msg.lang) end
-            if msg.record ~= nil then
-                self:_set_log(tostring(msg.record), msg.path and tostring(msg.path) or nil)
-            end
-            return nil
-        end
-        return self:_on_view(msg)
-    end
-    pipe(self.view, dispatch)
-    pipe(self.diag_view, dispatch)
+    pipe(self.view, function(msg) return self:_dispatch(msg) end)
 
     if self.log_path then
         -- `log=` on the command line starts recording before the probe's first
@@ -222,10 +203,55 @@ function Tuner:_status(text)
     self.view { status = text }
 end
 
+---One message from either window. During the serial probe only the local
+---choices go through — a language throw must not fall on the floor, a recording
+---is not tied to the transport, and the diagnostics window is a window: the
+---operator can open it on a link that is still coming up.
+---@param msg table
+function Tuner:_dispatch(msg)
+    if self.opening then
+        if msg.lang ~= nil then self:set_lang(msg.lang) end
+        if msg.record ~= nil then
+            self:_set_log(tostring(msg.record), msg.path and tostring(msg.path) or nil)
+        end
+        if msg.open == "diag" then self:open_diagnostics() end
+        return nil
+    end
+    return self:_on_view(msg)
+end
+
+---Create the diagnostics window the first time the operator asks for it, and
+---bring it to the front on every later press.
+function Tuner:open_diagnostics()
+    if not self.diag_view then
+        self.diag_view = QML { url = self.diag_url }
+        pipe(self.diag_view, function(msg) return self:_dispatch(msg) end)
+    end
+    self.diag_raise = self.diag_raise + 1
+    self:_push_diagnostics()
+end
+
+---Hand the diagnostics window its whole state: it may have been opened long
+---after the lines it shows were collected.
+function Tuner:_push_diagnostics()
+    if not self.diag_view then return end
+    self.diag_view {
+        transport = self.transport,
+        counters = self.transport == "serial",
+        log_active = self.log_file ~= nil,
+        log_path = self.log_path or default_log_path(),
+        text = table.concat(self.output, "\n"),
+        status = self.diag_status_text,
+        lang = i18n.lang,
+        raise = self.diag_raise,
+    }
+end
+
 ---Status line of the diagnostics window (counters, recording).
 ---@param text string
 function Tuner:_diag_status(text)
-    self.diag_view { status = text }
+    self.diag_status_text = text
+    if self.diag_view then self.diag_view { status = text } end
 end
 
 ---Append one line of the module's own output to the diagnostics scrollback.
@@ -234,6 +260,7 @@ function Tuner:_output_line(line)
     local lines = self.output
     lines[#lines + 1] = line
     if #lines > MAX_OUTPUT_LINES then table.remove(lines, 1) end
+    if not self.diag_view then return end
     -- A trace dump arrives a few lines per poll pass, and re-sending the whole
     -- scrollback for each of them is quadratic: refresh the view at most once
     -- per OUTPUT_PUSH_MS and always with the newest ring.
@@ -242,7 +269,7 @@ function Tuner:_output_line(line)
     self.output_scheduled = true
     after(OUTPUT_PUSH_MS, function()
         self.output_scheduled = false
-        if not self.output_pending then return end
+        if not self.output_pending or not self.diag_view then return end
         self.output_pending = false
         self.diag_view { text = table.concat(self.output, "\n") }
     end)
@@ -268,7 +295,7 @@ function Tuner:_set_log(command, path)
         end
         self.log_file:close()
         self.log_file = nil
-        self.diag_view { log_active = false }
+        if self.diag_view then self.diag_view { log_active = false } end
         self:_diag_status(i18n.text("diag_log_off"))
         log.info("tuner: recording stopped")
         return
@@ -286,7 +313,7 @@ function Tuner:_set_log(command, path)
     end
     self.log_file = file
     self.log_path = target
-    self.diag_view { log_active = true, log_path = target }
+    if self.diag_view then self.diag_view { log_active = true, log_path = target } end
     self:_diag_status(i18n.fmt("diag_log_on", target))
     log.info("tuner: recording to {}", target)
 end
@@ -328,6 +355,7 @@ function Tuner:set_lang(lang)
         self.by_id[param.id] = param
     end
     self.view { params = self.params, lang = i18n.lang }
+    if self.diag_view then self.diag_view { lang = i18n.lang } end
     log.info("tuner: language {}", i18n.lang)
     if self.on_lang then self.on_lang(i18n.lang) end
 end
@@ -353,6 +381,12 @@ function Tuner:_on_view(msg)
     -- never came up, otherwise the window would be half translated
     if msg.lang ~= nil then
         self:set_lang(msg.lang)
+        return nil
+    end
+    -- opening the diagnostics window is a local UI choice as well: it must work
+    -- on a link that never came up, it just shows what the module never sent
+    if msg.open == "diag" then
+        self:open_diagnostics()
         return nil
     end
     if self.inert and not msg.park then

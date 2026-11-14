@@ -98,7 +98,7 @@ if(NOT CMAKE_CROSSCOMPILING AND TARGET radapter)
             COMMAND ${CMAKE_COMMAND} -E env QT_QPA_PLATFORM=offscreen
                 $<TARGET_FILE:radapter> --gui ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_config.lua)
         set_tests_properties(gui_config PROPERTIES TIMEOUT 120)
-        # The diagnostics window the tuner opens beside itself: the counters live
+        # The diagnostics window the tuner's button opens: the counters live
         # there and a recording can be started and stopped from the window.
         add_test(NAME gui_diag
             COMMAND ${CMAKE_COMMAND} -E env QT_QPA_PLATFORM=offscreen

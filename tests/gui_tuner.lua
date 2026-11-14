@@ -72,10 +72,9 @@ local mark = 0
 
 qt:wait(2500)
 
--- The tuner opens the diagnostics window beside itself (tests/gui_diag.lua owns
--- that one); every interaction below belongs to the tuner window, whose title
--- starts with the application name in both languages.
-assert(#qt:windows() == 2, "the tuner must host the diagnostics window too")
+-- The diagnostics window is not open until the operator presses the tuner's
+-- button; every interaction before that belongs to the tuner window.
+assert(#qt:windows() == 1, "the tuner must open alone")
 qt:set_window("gaz_cart")
 
 assert(qt:find("paramrow_pid_kp"), "the tuner window has no parameter rows")

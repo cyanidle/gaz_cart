@@ -304,8 +304,9 @@ end)
 -- The bench tuner is the fourth window, over the transport the operator picked:
 -- the cart's service channel (CAN) by default, or a module's bench port with
 -- `serial=`. It is the same module and the same window debug/tune.lua opens.
--- It brings its own diagnostics window (counters, trace, recording) along, so a
--- session here has the same counters the serial launcher has.
+-- Its Diagnostics button opens a second window (counters, the trace dump, the
+-- recording controls), so a session here has the same counters the serial
+-- launcher has.
 -- A config value it writes over CAN is remembered like any other, so a tuning
 -- survives the cart's restart through the replay above.
 if opts.tune then

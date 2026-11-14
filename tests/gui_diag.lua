@@ -1,6 +1,7 @@
 -- Offscreen proof of the diagnostics window (qml/DiagWindow.qml → qml/Diag.qml):
--- the tuner opens it beside itself, the counters/trace buttons live there instead
--- of in the tuner window, and recording can be started and stopped from it.
+-- the tuner's Diagnostics button opens it (and only that button — a second press
+-- raises it instead of opening another), the counters/trace buttons live there
+-- instead of in the tuner window, and recording is started and stopped from it.
 --
 --     QT_QPA_PLATFORM=offscreen radapter --gui tests/gui_diag.lua
 --
@@ -43,15 +44,26 @@ require("mods.tuner").new {
 
 qt:wait(2500)
 
--- ---- the window is there, beside the tuner -----------------------------------
+-- ---- the window is opened by the tuner's button ------------------------------
+assert(#qt:windows() == 1, "the tuner must open alone")
+qt:set_window("gaz_cart")
+assert(qt:find("diagBtn"), "the tuner has no Diagnostics button")
+qt:click_item("diagBtn")
+qt:wait(600)
+
 local titles = qt:windows()
 local function list(windows)
     local parts = {}
     for _, title in ipairs(windows) do parts[#parts + 1] = tostring(title) end
     return table.concat(parts, " | ")
 end
-print("windows: " .. list(titles))
-assert(#titles == 2, "the tuner must open two windows, got: " .. list(titles))
+print("windows after the button: " .. list(titles))
+assert(#titles == 2, "the Diagnostics button opened no window: " .. list(titles))
+
+qt:set_window("gaz_cart")
+qt:click_item("diagBtn")
+qt:wait(400)
+assert(#qt:windows() == 2, "a second press opened another window: " .. list(qt:windows()))
 
 local diag_index
 for i, title in ipairs(titles) do
