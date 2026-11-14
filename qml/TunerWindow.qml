@@ -12,6 +12,10 @@ ApplicationWindow {
     title: Tr.t("window_tune")
     color: "#f0f0f0"
 
+    // The tuner is the window the operator works in; the diagnostics window the
+    // model opens beside it must not take the focus with it.
+    Component.onCompleted: requestActivate()
+
     Tuner {
         anchors.fill: parent
         model: radapter.model

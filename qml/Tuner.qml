@@ -480,27 +480,6 @@ Item {
                 text: Tr.t("tune_readback")
                 onClicked: root.model.send({ readback: true })
             }
-            Button {
-                objectName: "traceArmBtn"
-                visible: root.diagnostics
-                text: Tr.t("tune_trace_arm")
-                onClicked: {
-                    root.model.send({ line: "W1" })
-                    statusLabel.text = Tr.t("tune_trace_armed")
-                }
-            }
-            Button {
-                objectName: "traceDumpBtn"
-                visible: root.diagnostics
-                text: Tr.t("tune_trace_dump")
-                onClicked: root.model.send({ line: "W" })
-            }
-            Button {
-                objectName: "countersBtn"
-                visible: root.diagnostics
-                text: Tr.t("tune_counters")
-                onClicked: root.model.send({ line: "K" })
-            }
             Item { Layout.fillWidth: true }
         }
 

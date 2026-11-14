@@ -22,6 +22,12 @@
 --  read-back of that full-scale value. The module's EEPROM keeps every accepted
 --  value, so the sliders start from what the module runs now.
 --
+--  Beside it the tuner opens a diagnostics window (qml/DiagWindow.qml →
+--  qml/Diag.qml): the module's own output — the `K` counters, the loop-trace
+--  dump, EEPROM and boot lines — in a scrollback, the counters/trace buttons,
+--  and the record controls. Recording can be started and stopped there, and
+--  `log=` below starts it with the session.
+--
 --  Options are `key=value` words, because radapter's own CLI owns the dashed
 --  flags. Never point this at a powered cart: it commands the drive directly.
 -- =============================================================================
@@ -32,7 +38,8 @@ usage: radapter --gui debug/tune.lua [port=/dev/ttyACM0] [vmax=10] [log=<file>]
 
   port    module's serial bench channel (USART2)
   vmax    direct-voltage slider range, V
-  log     append every line the module sends to this file
+  log     start recording the module's lines to this file at once; the
+          diagnostics window can start and stop a recording as well
   lang    UI language; Russian is the default, and every window carries a
           tumbler that switches all of them
 

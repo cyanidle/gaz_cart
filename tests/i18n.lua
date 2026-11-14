@@ -75,6 +75,7 @@ end
 -- every window's texts are in the table, and every used key exists
 local qml_files = {
     "qml/LangSwitch.qml", "qml/ParamHelp.qml", "qml/Tuner.qml", "qml/TunerWindow.qml",
+    "qml/Diag.qml", "qml/DiagWindow.qml",
     "qml/WheelConfig.qml", "qml/WheelConfigWindow.qml", "qml/NavView.qml",
     "qml/NavWindow.qml", "qml/TeleopView.qml", "qml/TeleopWindow.qml",
 }

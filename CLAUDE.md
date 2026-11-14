@@ -51,7 +51,17 @@ tree dirty — every coherent step lands in a commit before you move on:
   `tests/tuner_help.lua`. `qml/Tuner.qml` + `qml/TunerWindow.qml` — the one shared
   window. `gui.lua` opens it (CAN by default, `serial=<port>` for a bench module)
   and `debug/tune.lua` is a thin serial launcher over the same files (`lang=ru|en`
-  as well). Numeric entry goes through the `qml/Num` singleton, which takes
+  as well). **A second window comes with it**: `qml/DiagWindow.qml` →
+  `qml/Diag.qml`, opened by `mods/tuner.lua` itself, so both entry points get it.
+  The module's own output — the `K` counters, the `W` loop-trace dump, EEPROM and
+  boot lines (`# …`) — lands in its scrollback, which is why the counters/trace
+  buttons live there and not in the tuner's status bar; the same window starts and
+  stops **recording** (what the transport delivers: the module's lines on serial,
+  one JSON object per `{state}` snapshot over CAN, which carries nothing else),
+  defaulting to `$XDG_DATA_HOME/gaz-gui/tune-<date>.log` — never the checkout.
+  It is created *before* the tuner window, which asks for the focus, so the
+  operator lands in the tuner. Numeric
+  entry goes through the `qml/Num` singleton, which takes
   either decimal separator: `parseFloat` stops at a comma, and a `DoubleValidator`
   follows the platform locale (`LC_NUMERIC`) — where it calls the typed text
   Invalid, Qt Quick never emits `editingFinished` and the edit is lost in silence

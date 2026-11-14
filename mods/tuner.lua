@@ -24,6 +24,17 @@
 --    status          one line of text for the bottom bar
 --    diag            { tgt_m_s, act_m_s, iq, uq, ud, im, bus, t_ms } — latest
 --                    sample; ud/im/t_ms only exist on the `V1` serial line
+--
+--  The tuner opens a second window beside itself (qml/DiagWindow.qml →
+--  qml/Diag.qml) over the same model; its keys are:
+--    counters        true when `K`/`W` exist at all (the serial bench channel;
+--                    the service channel carries a state snapshot only)
+--    text            the module's own output, newest last, MAX_OUTPUT_LINES kept
+--    log_active      a recording is open
+--    log_path        file the next (or the running) recording writes to
+--    status          one line for the window's bottom bar
+--  Messages it sends are the tuner's own: { line = "K"|"W"|"W1" } (serial),
+--  and { record = "start", path = … } / { record = "stop" } on either transport.
 -- =============================================================================
 
 local config_defs = require "mods.config_defs"
@@ -43,6 +54,38 @@ local FAULT_NAMES = {
 
 -- The service channel addresses one wheel of a four-module cart.
 local CAN_WHEELS = { "fl", "fr", "rl", "rr" }
+
+-- How many of the module's own output lines the diagnostics window keeps. A
+-- loop-trace dump alone is a few hundred lines, so the scrollback holds more
+-- than one `K` block and drops the oldest.
+local MAX_OUTPUT_LINES = 400
+
+-- How often the diagnostics scrollback is handed to the view, ms: a trace dump
+-- is delivered a few lines per poll pass, so one push per dump would re-send the
+-- whole ring dozens of times.
+local OUTPUT_PUSH_MS = 100
+
+---Directory a session's recording lands in: the same per-user data directory the
+---GUI keeps its sent-config state in, never the repository checkout.
+local function log_dir()
+    local base = os.getenv("XDG_DATA_HOME")
+    if base == nil or base == "" then
+        base = (os.getenv("HOME") or ".") .. "/.local/share"
+    end
+    local dir = base .. "/gaz-gui"
+    local ok, lfs = pcall(require, "lfs")
+    if ok and lfs then
+        pcall(lfs.mkdir, base)
+        pcall(lfs.mkdir, dir)
+    end
+    return dir
+end
+
+---Default recording file, one per start; the window shows it and the operator
+---can edit it before pressing Start.
+local function default_log_path()
+    return ("%s/tune-%s.log"):format(log_dir(), os.date("%Y%m%d-%H%M%S"))
+end
 
 ---Parameters the tuner shows: config_defs plus the hover help, in the active
 ---language (mods/i18n.lua).
@@ -89,7 +132,17 @@ function Tuner.new(opts)
     self.on_config_sent = opts.on_config_sent
     self.on_lang = opts.on_lang
 
+    -- The diagnostics window is created first so the tuner is the window the
+    -- operator lands in: the last window shown is the active one. The module's
+    -- own output (`K` counters, the loop-trace dump, EEPROM and boot lines) plus
+    -- the record controls live there — a trace dump is hundreds of lines and the
+    -- tuner's status bar shows one.
+    self.diag_view = QML { url = opts.diag_view or (REPO_DIR .. "/qml/DiagWindow.qml") }
     self.view = QML { url = opts.view or (REPO_DIR .. "/qml/TunerWindow.qml") }
+
+    self.output = {}
+    self.log_file = nil
+    self.log_path = opts.log_file
 
     self.view {
         transport = self.transport,
@@ -107,17 +160,42 @@ function Tuner.new(opts)
         lang = i18n.lang,
     }
 
+    self.diag_view {
+        transport = self.transport,
+        counters = self.transport == "serial",
+        log_active = false,
+        log_path = self.log_path or default_log_path(),
+        text = "",
+        status = i18n.text("diag_idle"),
+        lang = i18n.lang,
+    }
+
     -- The serial probe can take 20 s: a language throw must not fall on the
     -- floor meanwhile, while anything that would touch the transport has to
-    -- wait until it exists.
+    -- wait until it exists. Both windows speak to the same model, so the
+    -- routing is shared.
     self.opening = true
-    pipe(self.view, function(msg)
+    local function dispatch(msg)
         if self.opening then
+            -- a language throw must not fall on the floor, and a recording is
+            -- not tied to the transport: the file can be started while the
+            -- serial probe is still running
             if msg.lang ~= nil then self:set_lang(msg.lang) end
+            if msg.record ~= nil then
+                self:_set_log(tostring(msg.record), msg.path and tostring(msg.path) or nil)
+            end
             return nil
         end
         return self:_on_view(msg)
-    end)
+    end
+    pipe(self.view, dispatch)
+    pipe(self.diag_view, dispatch)
+
+    if self.log_path then
+        -- `log=` on the command line starts recording before the probe's first
+        -- line arrives; the window can start and stop it afterwards.
+        self:_set_log("start", self.log_path)
+    end
 
     if self.transport == "serial" then
         self:_open_serial(opts)
@@ -142,6 +220,75 @@ end
 
 function Tuner:_status(text)
     self.view { status = text }
+end
+
+---Status line of the diagnostics window (counters, recording).
+---@param text string
+function Tuner:_diag_status(text)
+    self.diag_view { status = text }
+end
+
+---Append one line of the module's own output to the diagnostics scrollback.
+---@param line string
+function Tuner:_output_line(line)
+    local lines = self.output
+    lines[#lines + 1] = line
+    if #lines > MAX_OUTPUT_LINES then table.remove(lines, 1) end
+    -- A trace dump arrives a few lines per poll pass, and re-sending the whole
+    -- scrollback for each of them is quadratic: refresh the view at most once
+    -- per OUTPUT_PUSH_MS and always with the newest ring.
+    self.output_pending = true
+    if self.output_scheduled then return end
+    self.output_scheduled = true
+    after(OUTPUT_PUSH_MS, function()
+        self.output_scheduled = false
+        if not self.output_pending then return end
+        self.output_pending = false
+        self.diag_view { text = table.concat(self.output, "\n") }
+    end)
+end
+
+---Record one delivered message: the module's line on a serial bench channel, one
+---JSON object per service-channel snapshot over CAN.
+---@param text string
+function Tuner:_log_record(text)
+    if not self.log_file then return end
+    self.log_file:write(text, "\n")
+    self.log_file:flush()
+end
+
+---Start or stop recording what the transport delivers.
+---@param command string "start" or "stop"
+---@param path string? file to append to; the window's own default when absent
+function Tuner:_set_log(command, path)
+    if command == "stop" then
+        if not self.log_file then
+            self:_diag_status(i18n.text("diag_log_off"))
+            return
+        end
+        self.log_file:close()
+        self.log_file = nil
+        self.diag_view { log_active = false }
+        self:_diag_status(i18n.text("diag_log_off"))
+        log.info("tuner: recording stopped")
+        return
+    end
+    if self.log_file then
+        self:_diag_status(i18n.fmt("diag_log_on", tostring(self.log_path)))
+        return
+    end
+    local target = (path ~= nil and path ~= "") and path or self.log_path or default_log_path()
+    local file, err = io.open(target, "a")
+    if not file then
+        log.error("tuner: cannot record to {}: {}", target, tostring(err))
+        self:_diag_status(i18n.fmt("diag_log_failed", tostring(target)))
+        return
+    end
+    self.log_file = file
+    self.log_path = target
+    self.diag_view { log_active = true, log_path = target }
+    self:_diag_status(i18n.fmt("diag_log_on", target))
+    log.info("tuner: recording to {}", target)
 end
 
 ---Pick which wheel the CAN transport drives. The previous wheel is zeroed
@@ -232,6 +379,8 @@ function Tuner:_on_view(msg)
         self:park()
     elseif msg.line then
         self:_terminal(msg.line)
+    elseif msg.record ~= nil then
+        self:_set_log(tostring(msg.record), msg.path and tostring(msg.path) or nil)
     else
         log.warn("tuner: unhandled UI message: {}", msg)
         return nil
@@ -254,6 +403,11 @@ function Tuner:park()
         self.motor("M0")
         self.motor("V0")
     end
+    if self.log_file then
+        self.log_file:close()
+        self.log_file = nil
+        log.info("tuner: recording closed")
+    end
 end
 
 -- ---- Serial transport -------------------------------------------------------
@@ -268,13 +422,8 @@ function Tuner:_open_serial(opts)
     self.motor = motor
     self.port = opts.port
 
-    local log_file = opts.log_file and io.open(opts.log_file, "a")
-
     pipe(motor, function(line)
-        if log_file then
-            log_file:write(fmt("{}\n", line))
-            log_file:flush()
-        end
+        self:_log_record(line)
         self:_on_serial_line(line)
     end)
 
@@ -354,14 +503,18 @@ function Tuner:_on_serial_line(line)
         end
     elseif line:match("^I ") then
         log.info("< {}", line)
+        self:_output_line(line)
         self:_status(line)
     elseif line:match("^ERR") then
         log.warn("< {}", line)
+        self:_output_line(line)
         self:_status(i18n.fmt("status_rejected", line))
     elseif line:match("^# ") then
         log.info("< {}", line)
+        self:_output_line(line)
     else
         log.info("< {}", line)
+        self:_output_line(line)
     end
 end
 
@@ -435,6 +588,11 @@ function Tuner:_terminal(line)
         return
     end
     self.motor(line)
+    -- the counters and the trace land in the diagnostics window, so their own
+    -- feedback belongs there too
+    if line == "W1" then
+        self:_diag_status(i18n.text("status_trace_armed"))
+    end
 end
 
 -- ---- CAN transport ----------------------------------------------------------
@@ -458,6 +616,9 @@ function Tuner:_open_can(opts)
 
     pipe(self.client, function(msg)
         if self.closing then return end
+        -- the recording of a CAN session is this snapshot stream, one JSON object
+        -- per line, because the service channel carries nothing else
+        self:_log_record(tostring(msg))
         local state = msg.state
         if not state then return end
         local wheels = state.wheels or {}

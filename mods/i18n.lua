@@ -85,12 +85,28 @@ local TEXT = {
         ru = "{}: сработал орган останова (тележка стоит)",
     },
     status_trace_armed = {
-        en = "trace armed",
-        ru = "трасса взведена",
+        en = "trace armed: the next anomaly dumps the last ~51 ms of loop history",
+        ru = "трасса взведена: первая аномалия сбросит последние ~51 мс истории цикла",
     },
     status_rejected = {
         en = "rejected: {}",
         ru = "отклонено: {}",
+    },
+    diag_idle = {
+        en = "ready: counters and recording",
+        ru = "готово: счётчики и запись",
+    },
+    diag_log_on = {
+        en = "recording to {}",
+        ru = "пишу в {}",
+    },
+    diag_log_off = {
+        en = "recording off, file closed",
+        ru = "запись выключена, файл закрыт",
+    },
+    diag_log_failed = {
+        en = "could not open {}",
+        ru = "не смог открыть {}",
     },
     diag_v1 = {
         en = "v={:.2f} rad/s   i={:.2f} A   bus={:.1f} V   {}   driver {}",
