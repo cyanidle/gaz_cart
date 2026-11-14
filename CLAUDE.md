@@ -339,6 +339,18 @@ Cyphal remains the cart's control path; commands received here drive the same
   limit (a fixed V per rad/s cap trailed the EMF and turned into a
   speed-dependent brake, which is what made the speed loop hunt). A clamped
   target reports `# simplefoc: target clamped, ceiling (m/s) <value>`.
+- **The speed ramp's useful band ends where the drive's own ends.** Bench
+  measurement 2026-11-14 (wheel free, 18.5 V rail, 0.625 m wheel, `T1`): the
+  façade's applied set-point follows `C13` exactly — 0.1 → 0.10, 1.0 → 1.00,
+  2.6 → 2.60 m/s², 20 → a step — but the wheel reaches the 0.686 m/s ceiling in
+  0.74 s at `C13=1.0`, 0.36 s at 2.6 and 0.25 s at 5.0, and no faster at 20,
+  because `uq` pins at 8.30 of the 8.3235 V modulation limit (≈2.8 m/s² is all
+  the voltage budget buys). A step overshoots +25 %, and the braking that follows
+  lifts the rail to 19.2 V and then collapses it to 9.2 V (the supply hiccup).
+  `C14` matters as much as `C13`: at 12 A/s the same 2.6 start overshot +27 %,
+  at the compiled 50 it did not overshoot at all. `C13 ≤ 5`, `C14 = 50`, and
+  `C16` below the ceiling (0.68 at this rail) is the working point; the GUI's
+  `speed_ramp` max is 5 for exactly this reason.
 - **`App/loop_trace.h` is the bench black box.** The 100 Hz `D` line cannot show
   why a drive stutters — a stutter is a few control periods long. The trace
   keeps the last ~51 ms of loop state (angle error, tracked angle, wheel rate,
