@@ -177,10 +177,15 @@ local PARAMS = {
         what = {
             en = "Set-point ramp, m/s^2: how fast the applied wheel-speed target may "
                 .. "change. It shapes every command into a slope, so a step cannot ask "
-                .. "for an acceleration the drive cannot deliver.",
+                .. "for an acceleration the drive cannot deliver. Past the drive's own "
+                .. "ceiling (~3 m/s^2 on an 18.5 V rail, where the whole d/q voltage "
+                .. "budget is spent) raising it changes nothing and only adds overshoot.",
             ru = "Разгон задания, м/с²: как быстро может меняться поданное задание "
                 .. "скорости колеса. Он превращает любую команду в наклон, поэтому "
-                .. "ступенька не потребует ускорения, которого привод не даст.",
+                .. "ступенька не потребует ускорения, которого привод не даст. Выше "
+                .. "собственного потолка привода (~3 м/с² на шине 18.5 В, где весь "
+                .. "бюджет напряжения d/q уже израсходован) увеличение ничего не меняет "
+                .. "и добавляет только выброс.",
         },
     },
     torque_ramp = {

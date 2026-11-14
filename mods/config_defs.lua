@@ -124,7 +124,7 @@ return {
     speed_ramp     = {
         id = 13, label = "Speed ramp", label_ru = "Разгон скорости",
         unit = "m/s²", unit_ru = "м/с²",
-        default = 0.75, min = 0.05, max = 100,  step = 0.05,
+        default = 0.75, min = 0.05, max = 5,   step = 0.05,
     },
     torque_ramp    = {
         id = 14, label = "Torque ramp", label_ru = "Разгон момента",
