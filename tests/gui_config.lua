@@ -67,6 +67,13 @@ assert(direct, "the direct-voltage field sent nothing")
 assert(direct.wheel == "all",
     "the localized 'all' label reached the wire as a wheel id: " .. tostring(direct.wheel))
 
+-- A typed number takes either decimal separator: parseFloat alone stops at a
+-- comma, so "0,5" used to reach the wire as 0.
+submit("dirField", "0,5")
+local comma = last_action("direct")
+assert(comma and math.abs(comma.value - 0.5) < 1e-6,
+    "a comma decimal lost its fraction: " .. tostring(comma and comma.value))
+
 submit("field_pid_kp", "2.5")
 local config = last_action("config")
 assert(config, "the config form sent nothing")

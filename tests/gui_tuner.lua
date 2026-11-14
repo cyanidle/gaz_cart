@@ -7,7 +7,8 @@
 -- Covers what the tuner must do over CAN: the service-channel handshake, the
 -- per-wheel state snapshot reaching the view, the message shapes for a wheel
 -- speed, an open-loop voltage and a config write, the wheel selector (switching
--- parks the wheel it leaves), and the hover help on every parameter name
+-- parks the wheel it leaves), a typed value (parameter or voltage range) taking
+-- either decimal separator, and the hover help on every parameter name
 -- (mods/tuner_help.lua text + a sketch that follows the value, while the slider
 -- and the value field stay popup-free). Screenshots go to $TUNER_SHOT_DIR.
 
@@ -223,6 +224,41 @@ assert(switched, "switching the wheel sent nothing")
 assert(switched.v == 0, "the wheel being left was not zeroed: " .. json_encode(switched))
 assert(tostring(qt:prop("tuneWheelBox", "currentText")) == "fr", "the wheel selector did not move to fr")
 assert(tostring(qt:prop("sourceLabel", "text")):find("fr"), "the source line still names the old wheel")
+
+-- ---- a typed number takes either decimal separator ---------------------------
+-- The platform locale decides what a DoubleValidator calls a number, and an
+-- Invalid text never emits editingFinished: a period decimal was dropped in
+-- silence and "8,3" lost its fraction to parseFloat. The fields must take
+-- whatever separator the operator's keyboard emits.
+local function type_into(field, what)
+    qt:click_item(field)
+    qt:wait(100)
+    qt:key_click("A", "ctrl")
+    qt:type(what)
+    qt:key_click("Return")
+    qt:wait(300)
+end
+
+local function volts(which)
+    return tonumber(tostring(qt:prop("voltSlider", which)))
+end
+
+type_into("voltMaxField", "12.5")
+assert(math.abs(volts("to") - 12.5) < 1e-6,
+    "a period decimal was dropped by the voltage range field: " .. tostring(volts("to")))
+type_into("voltMaxField", "8,3")
+assert(math.abs(volts("to") - 8.3) < 1e-6,
+    "a comma decimal lost its fraction in the voltage range field: " .. tostring(volts("to")))
+type_into("voltMinField", "-8,3")
+assert(math.abs(volts("from") + 8.3) < 1e-6,
+    "a comma decimal lost its fraction in the voltage range field: " .. tostring(volts("from")))
+
+mark = #received
+type_into("paramfield_wheel_diameter", "0,5")
+local typed = last_action_since(mark, "config")
+assert(typed, "a typed parameter value sent no config write")
+assert(math.abs(typed.value - 0.5) < 1e-6,
+    "a comma decimal lost its fraction in a parameter field: " .. tostring(typed.value))
 
 if SHOTS then qt:screenshot(SHOTS .. "/gui_tuner_can.png") end
 print("gui_tuner: ok")

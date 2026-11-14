@@ -51,7 +51,11 @@ tree dirty — every coherent step lands in a commit before you move on:
   `tests/tuner_help.lua`. `qml/Tuner.qml` + `qml/TunerWindow.qml` — the one shared
   window. `gui.lua` opens it (CAN by default, `serial=<port>` for a bench module)
   and `debug/tune.lua` is a thin serial launcher over the same files (`lang=ru|en`
-  as well).
+  as well). Numeric entry goes through the `qml/Num` singleton, which takes
+  either decimal separator: `parseFloat` stops at a comma, and a `DoubleValidator`
+  follows the platform locale (`LC_NUMERIC`) — where it calls the typed text
+  Invalid, Qt Quick never emits `editingFinished` and the edit is lost in silence
+  (`tests/gui_tuner.lua`/`tests/gui_config.lua` type both separators).
 - Localization — one tumbler (`qml/LangSwitch.qml`) switches the whole GUI
   between **Russian (default, not persisted)** and English, in every open window
   at once. Chrome text lives in the QML singleton `qml/Tr/Tr.qml`

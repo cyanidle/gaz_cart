@@ -3,6 +3,7 @@ import QtQuick.Controls 2.3
 import QtQuick.Layouts 1.3
 import QtCharts 2.3
 import "Tr"
+import "Num"
 
 Item {
     id: root
@@ -183,7 +184,7 @@ Item {
                 text: "0.0"
                 selectByMouse: true
                 onAccepted: {
-                    var v = parseFloat(text)
+                    var v = Num.of(text)
                     if (isNaN(v)) return
                     model.send({ action: "set_speed", wheel: tgtWheelBox.currentValue, value: v })
                     statusLabel.text = Tr.tf("cfg_target_status",
@@ -214,7 +215,7 @@ Item {
                 text: "0.0"
                 selectByMouse: true
                 onAccepted: {
-                    var v = parseFloat(text)
+                    var v = Num.of(text)
                     if (isNaN(v)) return
                     model.send({ action: "direct", wheel: dirWheelBox.currentValue, value: v })
                     statusLabel.text = Tr.tf("cfg_direct_status",
@@ -282,7 +283,7 @@ Item {
                                     placeholderText: modelData.unit
                                     background: Rectangle { color: "transparent" }
                                     onAccepted: {
-                                        var v = parseFloat(text)
+                                        var v = Num.of(text)
                                         if (isNaN(v)) {
                                             statusLabel.text = Tr.tf("cfg_not_a_number", text)
                                             return

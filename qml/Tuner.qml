@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtCharts 2.3
 import "Tr"
+import "Num"
 
 // One bench tuner view for both transports (mods/tuner.lua decides which):
 //   serial  a module over USART2 — per-phase diagnostics, read-back, enable
@@ -327,7 +328,7 @@ Item {
                 selectByMouse: true
                 horizontalAlignment: TextInput.AlignHCenter
                 onAccepted: {
-                    var v = parseFloat(text)
+                    var v = Num.of(text)
                     if (isNaN(v)) return
                     tgtSlider.value = Math.max(-1, Math.min(1, v))
                     tgtSlider.send()
@@ -374,7 +375,7 @@ Item {
                 selectByMouse: true
                 horizontalAlignment: TextInput.AlignHCenter
                 onAccepted: {
-                    var v = parseFloat(text)
+                    var v = Num.of(text)
                     if (isNaN(v)) return
                     voltSlider.value = Math.max(root.minVoltage, Math.min(root.maxVoltage, v))
                     voltSlider.send()
@@ -406,9 +407,14 @@ Item {
                 text: root.minVoltage.toFixed(1)
                 selectByMouse: true
                 horizontalAlignment: TextInput.AlignHCenter
-                validator: DoubleValidator { bottom: -40.0; top: 0.0 }
+                // Both separators: the platform locale decides what a plain
+                // DoubleValidator calls a number, and an Invalid text never
+                // emits editingFinished (the edit would be lost silently).
+                validator: RegularExpressionValidator {
+                    regularExpression: /^-?\d*[.,]?\d*$/
+                }
                 onEditingFinished: {
-                    var v = parseFloat(text)
+                    var v = Num.of(text)
                     if (isNaN(v)) { text = root.minVoltage.toFixed(1); return }
                     root.minVoltage = Math.min(0, Math.max(-40, v))
                     text = root.minVoltage.toFixed(1)
@@ -422,9 +428,11 @@ Item {
                 text: root.maxVoltage.toFixed(1)
                 selectByMouse: true
                 horizontalAlignment: TextInput.AlignHCenter
-                validator: DoubleValidator { bottom: 0.0; top: 40.0 }
+                validator: RegularExpressionValidator {
+                    regularExpression: /^-?\d*[.,]?\d*$/
+                }
                 onEditingFinished: {
-                    var v = parseFloat(text)
+                    var v = Num.of(text)
                     if (isNaN(v)) { text = root.maxVoltage.toFixed(1); return }
                     root.maxVoltage = Math.max(0, Math.min(40, v))
                     text = root.maxVoltage.toFixed(1)
@@ -573,7 +581,7 @@ Item {
                             selectByMouse: true
                             horizontalAlignment: TextInput.AlignHCenter
                             onAccepted: {
-                                var v = parseFloat(text)
+                                var v = Num.of(text)
                                 if (isNaN(v)) return
                                 paramSlider.value = Math.max(modelData.min, Math.min(modelData.max, v))
                                 paramSlider.send()
